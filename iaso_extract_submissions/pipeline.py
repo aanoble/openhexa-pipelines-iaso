@@ -71,8 +71,6 @@ def iaso_extract_submissions(
 
     form_id, form_name = validate_form_existence(iaso, form_id)
 
-    current_run.log_info(f"{form_id}, {form_name}, {type(iaso)}, {iaso.api_client.server_url}")
-
     df_submissions = fetch_form_submissions(iaso, form_id)
 
     if choices_to_labels:
@@ -232,6 +230,7 @@ def save_submissions_to_database(
             connection=workspace.database_url,
             if_table_exists=save_mode,
         )
+        current_run.add_database_output(f"submissions_{form_name}")
         current_run.log_info(f"Form submissions saved to database as table submissions_{form_name}")
 
 
@@ -246,18 +245,17 @@ def save_submissions_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, 
     """
 
     if dataset:
-        current_run.log_info("Exporting form submissions to dataset {dataset.name}")
+        current_run.log_info(f"Exporting form submissions to dataset {dataset.name}")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
         output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
         output_dir.mkdir(exist_ok=True, parents=True)
 
-        submissions_file = f"{output_dir}/submissions_{form_name}_{timestamp}.csv"
+        submissions_file = output_dir / f"submissions_{form_name}_{timestamp}.csv"
 
         df_submissions.write_csv(submissions_file)
 
-        _version = f"submissions_{form_name}_{timestamp}"
-        version = dataset.create_version(_version)
+        version = dataset.create_version(f"submissions_{form_name}_{timestamp}") if not dataset.latest_version else dataset.latest_version
         version.add_file(submissions_file)
 
         submissions_file.unlink()
