@@ -10,10 +10,12 @@ on:
 
 jobs:
   deploy:
-    matrix:
+    strategy:
+      matrix:
         pipeline: [
           {"workspace": "workspace-civ-msp-12508c", "pipeline_id": "iaso_extract_submissions", "token": OH_TOKEN_CIV},
         ]
+        
     runs-on: ubuntu-latest
 
     steps:
