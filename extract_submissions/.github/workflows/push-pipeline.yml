@@ -21,7 +21,7 @@ jobs:
         uses: blsq/openhexa-cli-action@v1
         with:
           workspace: "workspace-civ-msp-12508c"
-          token: ${{ secrets.OH_TOKEN }}
+          token: ${{ secrets.OH_TOKEN_CIV}}
       - name: Push pipeline to OpenHEXA
         run: |
           openhexa pipelines push . --yes
