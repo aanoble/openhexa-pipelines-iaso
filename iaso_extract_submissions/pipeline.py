@@ -64,7 +64,7 @@ def iaso_extract_submissions(
     """Pipeline orchestration function for extracting and processing form submissions."""
 
     if not any([save_to_database, dataset]):
-        current_run.log_error("Output datasources for loading is not define")
+        current_run.log_error("Output data sources for loading are not defined")
         raise
 
     iaso = authenticate_iaso(iaso_connection)
@@ -81,6 +81,29 @@ def iaso_extract_submissions(
     save_submissions_to_database(save_to_database, save_mode, df_submissions, form_name)
 
     save_submissions_to_dataset(dataset, df_submissions, form_name)
+
+
+def authenticate_iaso(iaso_connection: IASOConnection) -> IASO:
+    """
+    Authenticates and returns an IASO object.
+
+    Args:
+        iaso_connection (IASOConnection): IASO connection details.
+
+    Returns:
+        IASO: An authenticated IASO object.
+    """
+    try:
+        iaso = IASO(
+            iaso_connection.url,
+            iaso_connection.username,
+            iaso_connection.password,
+        )
+        current_run.log_info("Connect to IASO instance with success")
+        return iaso
+    except Exception as e:
+        current_run.log_error(f"Error while authenticating IASO: {e}")
+        raise
 
 
 def validate_form_existence(iaso: IASO, form_id: int) -> Tuple[int, str]:
@@ -123,6 +146,7 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
     """
 
     try:
+        current_run.log_info("Fetching form submissions data")
         params = {
             "csv": True,
             "form_ids": form_id,
@@ -179,7 +203,7 @@ def map_choice_names_to_labels(
         current_run.log_error(f"Error replacing choice names with labels: {e}")
         raise ValueError("Error replacing choice names with labels")
 
-    current_run.log_info("Choice names replaced with labels successfully")
+    current_run.log_info("Choice names have been successfully replaced with labels")
 
     return df_submissions
 
@@ -224,7 +248,6 @@ def save_submissions_to_database(
 
     if save_to_database:
         current_run.log_info("Exporting form submissions to database")
-        # dbengine = create_engine(workspace.database_url)
         df_submissions.write_database(
             table_name=f"submissions_{form_name}",
             connection=workspace.database_url,
@@ -255,35 +278,18 @@ def save_submissions_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, 
 
         df_submissions.write_csv(submissions_file)
 
-        version = dataset.create_version(f"submissions_{form_name}_{timestamp}") if not dataset.latest_version else dataset.latest_version
+        version = next((v for v in dataset.versions if v.name == f"submissions_{form_name}"), None)
+
+        version = version or dataset.create_version(f"submissions_{form_name}")
+
         version.add_file(submissions_file)
 
         submissions_file.unlink()
         output_dir.rmdir()
 
-        current_run.log_info(f"Form submissions saved to dataset {dataset.name} successfully")
-
-
-def authenticate_iaso(iaso_connection: IASOConnection) -> IASO:
-    """
-    Authenticates and returns an IASO object.
-
-    Args:
-        iaso_connection (IASOConnection): IASO connection details.
-
-    Returns:
-        IASO: An authenticated IASO object.
-    """
-    try:
-        iaso = IASO(
-            iaso_connection.url,
-            iaso_connection.username,
-            iaso_connection.password,
+        current_run.log_info(
+            f"Form submissions successfully saved to {dataset.name} dataset in {version.name} version"
         )
-        return iaso
-    except Exception as e:
-        current_run.log_error(f"Error while authenticating IASO: {e}")
-        raise
 
 
 def clean_string(data) -> str:
