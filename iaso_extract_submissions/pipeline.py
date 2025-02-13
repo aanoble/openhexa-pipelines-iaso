@@ -5,7 +5,6 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple
-from urllib.parse import urlparse
 
 import pandas as pd
 import polars as pl
@@ -64,12 +63,14 @@ def iaso_extract_submissions(
 ):
     """Pipeline orchestration function for extracting and processing form submissions."""
 
+    if not all([save_to_database, dataset]):
+        current_run.log_error("Output datasources for loading is not define")
+        raise
+
     iaso = authenticate_iaso(iaso_connection)
 
-    _ = validate_form_existence(iaso, form_id)
-    
-    form_id, form_name = _[0], _[1]
-    
+    form_id, form_name = validate_form_existence(iaso, form_id)
+
     current_run.log_info(f"{form_id}, {form_name}, {type(iaso)}, {iaso.api_client.server_url}")
 
     df_submissions = fetch_form_submissions(iaso, form_id)
@@ -83,7 +84,7 @@ def iaso_extract_submissions(
 
     save_submissions_to_dataset(dataset, df_submissions, form_name)
 
-@iaso_extract_submissions.task
+
 def validate_form_existence(iaso: IASO, form_id: int) -> Tuple[int, str]:
     """
     Validates if the form with the given ID exists in IASO.
@@ -107,7 +108,7 @@ def validate_form_existence(iaso: IASO, form_id: int) -> Tuple[int, str]:
         current_run.log_error("Form ID does not exist in IASO Instance")
         raise
 
-@iaso_extract_submissions.task
+
 def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
     """
     Retrieves form submissions as a Polars DataFrame from the IASO API.
@@ -144,7 +145,6 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
         raise
 
 
-@iaso_extract_submissions.task
 def map_choice_names_to_labels(
     iaso: IASO, df_submissions: pl.DataFrame, form_id: int
 ) -> pl.DataFrame:
@@ -186,7 +186,6 @@ def map_choice_names_to_labels(
     return df_submissions
 
 
-@iaso_extract_submissions.task
 def handle_duplicate_columns(df_submissions: pl.DataFrame) -> pl.DataFrame:
     """
     Renames duplicate columns in the DataFrame by appending a unique suffix.
@@ -212,7 +211,6 @@ def handle_duplicate_columns(df_submissions: pl.DataFrame) -> pl.DataFrame:
     return df_submissions
 
 
-@iaso_extract_submissions.task
 def save_submissions_to_database(
     save_to_database: bool, save_mode: str, df_submissions: pl.DataFrame, form_name: str
 ):
@@ -237,7 +235,6 @@ def save_submissions_to_database(
         current_run.log_info(f"Form submissions saved to database as table submissions_{form_name}")
 
 
-@iaso_extract_submissions.task
 def save_submissions_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, form_name: str):
     """
     Saves form submissions to the specified dataset.
@@ -279,7 +276,7 @@ def authenticate_iaso(iaso_connection: IASOConnection) -> IASO:
     Returns:
         IASO: An authenticated IASO object.
     """
-    try:                
+    try:
         iaso = IASO(
             iaso_connection.url,
             iaso_connection.username,
@@ -289,6 +286,7 @@ def authenticate_iaso(iaso_connection: IASOConnection) -> IASO:
     except Exception as e:
         current_run.log_error(f"Error while authenticating IASO: {e}")
         raise
+
 
 def clean_string(data) -> str:
     """
@@ -323,7 +321,7 @@ def get_form_metadata(iaso: IASO, form_id: int):
             f"/api/forms/{form_id}", params={"fields": {"latest_form_version"}}
         )
         json_response = response.json()
-        
+
         url = json_response.get("latest_form_version", {}).get("xls_file")
 
         df_choices = pd.read_excel(url, sheet_name="choices")
