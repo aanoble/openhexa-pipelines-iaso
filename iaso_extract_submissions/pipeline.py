@@ -4,7 +4,6 @@ import re
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple
 
 import pandas as pd
 import polars as pl
@@ -35,23 +34,23 @@ from openhexa.toolbox.iaso import IASO
     type=bool,
     required=True,
     default=True,
-    help="Save the submissions form data to database",
+    help="Save submissions data to database",
 )
 @parameter(
     "save_mode",
     name="Saving mode",
     type=str,
     required=True,
-    help="Select saving mode if the form table already exists in the database",
     choices=["append", "replace"],
     default="replace",
+    help="Select mode if table exists",
 )
 @parameter(
     "dataset",
     name="Output dataset",
     type=Dataset,
     required=False,
-    help="Dataset to store the form submissions data",
+    help="Dataset to store submissions data",
 )
 def iaso_extract_submissions(
     iaso_connection: IASOConnection,
@@ -64,70 +63,66 @@ def iaso_extract_submissions(
     """Pipeline orchestration function for extracting and processing form submissions."""
 
     if not any([save_to_database, dataset]):
-        current_run.log_error("Output data sources for loading are not defined")
-        raise
+        current_run.log_error("No output destinations defined")
+        raise ValueError("No output destinations specified")
 
     iaso = authenticate_iaso(iaso_connection)
 
-    form_id, form_name = validate_form_existence(iaso, form_id)
+    form_name = get_form_name(iaso, form_id)
 
     df_submissions = fetch_form_submissions(iaso, form_id)
 
     if choices_to_labels:
-        df_submissions = map_choice_names_to_labels(iaso, df_submissions, form_id)
+        df_submissions = replace_choice_labels(iaso, df_submissions, form_id)
 
-    df_submissions = handle_duplicate_columns(df_submissions)
+    df_submissions = deduplicate_columns(df_submissions)
 
-    save_submissions_to_database(save_to_database, save_mode, df_submissions, form_name)
+    if save_to_database:
+        export_to_database(df_submissions, form_name, save_mode)
 
-    save_submissions_to_dataset(dataset, df_submissions, form_name)
+    if dataset:
+        export_to_dataset(dataset, df_submissions, form_name)
 
 
-def authenticate_iaso(iaso_connection: IASOConnection) -> IASO:
+def authenticate_iaso(conn: IASOConnection) -> IASO:
     """
     Authenticates and returns an IASO object.
 
     Args:
-        iaso_connection (IASOConnection): IASO connection details.
+        conn (IASOConnection): IASO connection details.
 
     Returns:
         IASO: An authenticated IASO object.
     """
     try:
-        iaso = IASO(
-            iaso_connection.url,
-            iaso_connection.username,
-            iaso_connection.password,
-        )
-        current_run.log_info("Connect to IASO instance with success")
+        iaso = IASO(conn.url, conn.username, conn.password)
+        current_run.log_info("IASO authentication successful")
         return iaso
     except Exception as e:
-        current_run.log_error(f"Error while authenticating IASO: {e}")
+        current_run.log_error(f"Authentication failed: {str(e)}")
         raise
 
 
-def validate_form_existence(iaso: IASO, form_id: int) -> Tuple[int, str]:
+def get_form_name(iaso: IASO, form_id: int) -> str:
     """
-    Validates if the form with the given ID exists in IASO.
+    Retrieve and sanitize form name.
 
     Args:
         iaso (IASO): An authenticated IASO object.
         form_id (int): The ID of the form to check.
 
     Returns:
-        Tuple[int, str]: Form ID and name.
+        str: Form name.
 
     Raises:
         ValueError: If the form does not exist.
     """
     try:
         response = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": {"name"}})
-        form_data = response.json()
-        form_name = clean_string(form_data.get("name"))
-        return form_id, form_name
-    except Exception:
-        current_run.log_error("Form ID does not exist in IASO Instance")
-        raise
+        return clean_string(response.json().get("name"))
+    except Exception as e:
+        current_run.log_error(f"Form fetch failed: {str(e)}")
+        raise ValueError("Invalid form ID")
 
 
 def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
@@ -154,7 +149,7 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
         response = iaso.api_client.get("/api/instances/", params=params)
 
         if not response.content:
-            current_run.log_error("No submissions found for the form")
+            current_run.log_error("No submissions found")
             raise
         try:
             df_submissions = pl.read_csv(response.content)
@@ -167,9 +162,7 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
         raise
 
 
-def map_choice_names_to_labels(
-    iaso: IASO, df_submissions: pl.DataFrame, form_id: int
-) -> pl.DataFrame:
+def replace_choice_labels(iaso: IASO, df_submissions: pl.DataFrame, form_id: int) -> pl.DataFrame:
     """
     Replaces choice names with their corresponding labels in the DataFrame.
 
@@ -182,23 +175,26 @@ def map_choice_names_to_labels(
         pl.DataFrame: DataFrame with choice names replaced by labels.
     """
 
-    df_choices = get_form_metadata(iaso, form_id)
+    df_choices = fetch_form_choices(iaso, form_id)
 
-    if df_choices.empty:
+    if df_choices.is_empty():
         current_run.log_info("No choices label found in form metadata")
         return df_submissions
 
     try:
-        for col in df_submissions.columns:
-            if col in df_choices["list_name"].unique():
-                dict_choices = (
-                    df_choices.loc[df_choices["list_name"] == col]
-                    .set_index("name")["label"]
-                    .to_dict()
-                )
-                df_submissions = df_submissions.with_columns(
-                    pl.col(col).map_dict(dict_choices).alias(col)
-                )
+        choice_maps = {
+            col: dict(zip(df_choices["name"], df_choices["label"]))
+            for col in df_choices["list_name"].unique()
+        }
+
+        df_submissions.with_columns(
+            [
+                pl.col(col).map_dict(mapping).alias(col)
+                for col, mapping in choice_maps.items()
+                if col in df_submissions.columns
+            ]
+        )
+
     except Exception as e:
         current_run.log_error(f"Error replacing choice names with labels: {e}")
         raise ValueError("Error replacing choice names with labels")
@@ -208,7 +204,7 @@ def map_choice_names_to_labels(
     return df_submissions
 
 
-def handle_duplicate_columns(df_submissions: pl.DataFrame) -> pl.DataFrame:
+def deduplicate_columns(df_submissions: pl.DataFrame) -> pl.DataFrame:
     """
     Renames duplicate columns in the DataFrame by appending a unique suffix.
 
@@ -233,9 +229,7 @@ def handle_duplicate_columns(df_submissions: pl.DataFrame) -> pl.DataFrame:
     return df_submissions
 
 
-def save_submissions_to_database(
-    save_to_database: bool, save_mode: str, df_submissions: pl.DataFrame, form_name: str
-):
+def export_to_database(df_submissions: pl.DataFrame, form_name: str, mode: str):
     """
     Saves form submissions to a database if requested.
 
@@ -246,18 +240,17 @@ def save_submissions_to_database(
         form_name (str): Name of the form.
     """
 
-    if save_to_database:
-        current_run.log_info("Exporting form submissions to database")
-        df_submissions.write_database(
-            table_name=f"submissions_{form_name}",
-            connection=workspace.database_url,
-            if_table_exists=save_mode,
-        )
-        current_run.add_database_output(f"submissions_{form_name}")
-        current_run.log_info(f"Form submissions saved to database as table submissions_{form_name}")
+    current_run.log_info("Exporting form submissions to database")
+    df_submissions.write_database(
+        table_name=f"submissions_{form_name}",
+        connection=workspace.database_url,
+        if_table_exists=mode,
+    )
+    current_run.add_database_output(f"submissions_{form_name}")
+    current_run.log_info(f"Form submissions saved to database as table submissions_{form_name}")
 
 
-def save_submissions_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, form_name: str):
+def export_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, form_name: str):
     """
     Saves form submissions to the specified dataset.
 
@@ -267,29 +260,31 @@ def save_submissions_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, 
         form_name (str): Name of the form.
     """
 
-    if dataset:
-        current_run.log_info(f"Export form submissions to dataset {dataset.name}")
+    current_run.log_info(f"Export form submissions to dataset {dataset.name}")
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
-        output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
-        output_dir.mkdir(exist_ok=True, parents=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
+    output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
+    output_dir.mkdir(exist_ok=True, parents=True)
 
-        submissions_file = output_dir / f"submissions_{form_name}_{timestamp}.csv"
+    try:
+        # Write to temporary file
+        temp_file = output_dir / f"submissions_{form_name}_{timestamp}.csv"
+        df_submissions.write_csv(temp_file)
 
-        df_submissions.write_csv(submissions_file)
+        # Create/retrieve dataset version
+        version_name = f"submissions_{form_name}"
+        version = next((v for v in dataset.versions if v.name == version_name), None)
+        version = version or dataset.create_version(version_name)
 
-        version = next((v for v in dataset.versions if v.name == f"submissions_{form_name}"), None)
-
-        version = version or dataset.create_version(f"submissions_{form_name}")
-
-        version.add_file(submissions_file)
-
-        submissions_file.unlink()
-        output_dir.rmdir()
+        # Add and cleannup
+        version.add_file(temp_file)
+        temp_file.unlink()
 
         current_run.log_info(
             f"Form submissions successfully saved to {dataset.name} dataset in {version.name} version"
         )
+    finally:
+        output_dir.rmdir()
 
 
 def clean_string(data) -> str:
@@ -304,12 +299,12 @@ def clean_string(data) -> str:
 
     data = unicodedata.normalize("NFD", data)
     data = "".join(c for c in data if not unicodedata.combining(c))
+    # Precompile regex patterns for performance
+    data = re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
+    return data
 
-    data = re.sub(r"[^\w\s-]", "", data).strip()
-    return data.replace(" ", "_").lower()
 
-
-def get_form_metadata(iaso: IASO, form_id: int):
+def fetch_form_choices(iaso: IASO, form_id: int) -> pl.DataFrame:
     """
     Retrieves form metadata from IASO API.
 
@@ -318,29 +313,23 @@ def get_form_metadata(iaso: IASO, form_id: int):
         form_id (int): Form ID to retrieve metadata.
 
     Returns:
-        pd.DataFrame: Form metadata DataFrame.
+        pl.DataFrame: Form metadata DataFrame.
     """
     try:
-        response = iaso.api_client.get(
-            f"/api/forms/{form_id}", params={"fields": {"latest_form_version"}}
+        res = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": "latest_form_version"})
+        xls_url = res.json().get("latest_form_version", {}).get("xls_file", "")
+
+        if not xls_url:
+            return pl.DataFrame()
+
+        return pl.from_pandas(
+            pd.read_excel(xls_url, sheet_name="choices")
+            .dropna(subset=["list_name", "label"])
+            .reset_index(drop=True)
         )
-        json_response = response.json()
-
-        url = json_response.get("latest_form_version", {}).get("xls_file")
-
-        df_choices = pd.read_excel(url, sheet_name="choices")
-
-        try:
-            df_choices = df_choices.loc[
-                (df_choices["list_name"].notna()) & (df_choices["label"].notna())
-            ]
-        except Exception:
-            current_run.log_warning("Columns 'list_name' and 'label' not found in choices sheet")
-        return df_choices
-
     except Exception as e:
-        current_run.log_error(f"Error getting form metadata choices: {e}")
-        raise ValueError("Error getting form metadata")
+        current_run.log_warning(f"Choice metadata incomplete: {str(e)}")
+        return pl.DataFrame()
 
 
 if __name__ == "__main__":
