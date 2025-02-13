@@ -146,7 +146,7 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
     """
 
     try:
-        current_run.log_info("Fetching form submissions data")
+        current_run.log_info("Fetch form submissions data")
         params = {
             "csv": True,
             "form_ids": form_id,
@@ -268,7 +268,7 @@ def save_submissions_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, 
     """
 
     if dataset:
-        current_run.log_info(f"Exporting form submissions to dataset {dataset.name}")
+        current_run.log_info(f"Export form submissions to dataset {dataset.name}")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
         output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
