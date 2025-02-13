@@ -3,13 +3,17 @@ name: Push extract_submissions pipeline to OpenHEXA Workspaces
 on:
   push:
     paths:
-      - ".github/workflows/push-extract_submissions.yml"
-      - 'extract_submissions/**'
+      - ".github/workflows/push-iaso-extract-submissions.yml"
+      - "iaso_extract_submissions/**"
     branches:
       - main
 
 jobs:
   deploy:
+    matrix:
+        pipeline: [
+          {"workspace": "workspace-civ-msp-12508c", "pipeline_id": "iaso_extract_submissions", "token": OH_TOKEN_CIV},
+        ]
     runs-on: ubuntu-latest
 
     steps:
@@ -23,12 +27,13 @@ jobs:
       - name: Configure OpenHEXA CLI
         uses: blsq/openhexa-cli-action@v1
         with:
-          workspace: "workspace-civ-msp-12508c"
-          token: ${{ secrets.OH_TOKEN_CIV}}
+          workspace: ${{ matrix.pipeline.workspace }}
+          token: ${{ secrets[matrix.pipeline.token] }}
+          
       - name: Push pipeline to OpenHEXA
         run: |
-          openhexa pipelines push extract_submissions \
+          sed -i "s/__pipeline_id__/${{ matrix.pipeline.pipeline_id }}/g" iaso_extract_submissions/pipeline.py && \
+          openhexa pipelines push iaso_extract_submissions \
             -n ${{ github.sha }} \
             -l "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
             --yes
-        
