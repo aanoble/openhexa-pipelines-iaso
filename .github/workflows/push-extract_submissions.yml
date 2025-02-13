@@ -1,7 +1,10 @@
-name: Push pipeline on OpenHEXA
+name: Push extract_submissions pipeline to OpenHEXA Workspaces
 
 on:
   push:
+    paths:
+      - ".github/workflows/push-extract_submissions.yml"
+      - 'extract_submissions/**'
     branches:
       - main
 
@@ -24,5 +27,8 @@ jobs:
           token: ${{ secrets.OH_TOKEN_CIV}}
       - name: Push pipeline to OpenHEXA
         run: |
-          openhexa pipelines push . --yes
+          openhexa pipelines push extract_submissions \
+            -n ${{ github.sha }} \
+            -l "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
+            --yes
         
