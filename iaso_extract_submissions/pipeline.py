@@ -63,7 +63,7 @@ def iaso_extract_submissions(
 ):
     """Pipeline orchestration function for extracting and processing form submissions."""
 
-    if not all([save_to_database, dataset]):
+    if not any([save_to_database, dataset]):
         current_run.log_error("Output datasources for loading is not define")
         raise
 
