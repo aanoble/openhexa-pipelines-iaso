@@ -68,7 +68,7 @@ def iaso_extract_submissions(
 
     form_id, form_name = validate_form_existence(iaso, form_id)
     
-    current_run.log_debug(f"{form_id}, {form_name}, {type(iaso)}")
+    current_run.log_info(f"{form_id}, {form_name}, {type(iaso)}, {iaso.api_client.server_url}")
 
     df_submissions = fetch_form_submissions(iaso, form_id)
 
@@ -100,7 +100,7 @@ def validate_form_existence(iaso: IASO, form_id: int) -> Tuple[int, str]:
         response = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": {"name"}})
         form_data = response.json()
         form_name = clean_string(form_data.get("name"))
-        return [form_id, form_name]
+        return list([form_id, form_name])
     except Exception:
         current_run.log_error("Form ID does not exist in IASO Instance")
         raise
