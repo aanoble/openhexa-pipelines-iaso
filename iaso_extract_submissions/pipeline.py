@@ -281,10 +281,13 @@ def authenticate_iaso(iaso_connection: IASOConnection) -> IASO:
         if not parsed.scheme or not parsed.netloc:
             current_run.log_error("Invalid URL format for IASO connection")
             raise
+        
+        current_run.log_info(f"{parsed.scheme}://{parsed.netloc}")
+        
         iaso = IASO(
-            f"{parsed.scheme}://{parsed.netloc}",
-            iaso_connection.username,
-            iaso_connection.password,
+            server_url = f"{parsed.scheme}://{parsed.netloc}",
+            username=iaso_connection.username,
+            password=iaso_connection.password,
         )
         return iaso
     except Exception as e:
