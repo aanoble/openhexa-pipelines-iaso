@@ -67,6 +67,8 @@ def iaso_extract_submissions(
     iaso = authenticate_iaso(iaso_connection)
 
     form_id, form_name = validate_form_existence(iaso, form_id)
+    
+    current_run.log_debug(f"{form_id}, {form_name}, {type(iaso)}")
 
     df_submissions = fetch_form_submissions(iaso, form_id)
 
@@ -79,7 +81,7 @@ def iaso_extract_submissions(
 
     save_submissions_to_dataset(dataset, df_submissions, form_name)
 
-
+@iaso_extract_submissions.task
 def validate_form_existence(iaso: IASO, form_id: int) -> Tuple[int, str]:
     """
     Validates if the form with the given ID exists in IASO.
@@ -98,11 +100,10 @@ def validate_form_existence(iaso: IASO, form_id: int) -> Tuple[int, str]:
         response = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": {"name"}})
         form_data = response.json()
         form_name = clean_string(form_data.get("name"))
-        return form_id, form_name
+        return [form_id, form_name]
     except Exception:
         current_run.log_error("Form ID does not exist in IASO Instance")
         raise
-
 
 @iaso_extract_submissions.task
 def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
@@ -276,24 +277,16 @@ def authenticate_iaso(iaso_connection: IASOConnection) -> IASO:
     Returns:
         IASO: An authenticated IASO object.
     """
-    try:
-        parsed = urlparse(iaso_connection.url)
-        if not parsed.scheme or not parsed.netloc:
-            current_run.log_error("Invalid URL format for IASO connection")
-            raise
-        
-        current_run.log_info(f"{parsed.scheme}://{parsed.netloc}")
-        
+    try:                
         iaso = IASO(
-            server_url = f"{parsed.scheme}://{parsed.netloc}",
-            username=iaso_connection.username,
-            password=iaso_connection.password,
+            iaso_connection.url,
+            iaso_connection.username,
+            iaso_connection.password,
         )
         return iaso
     except Exception as e:
         current_run.log_error(f"Error while authenticating IASO: {e}")
         raise
-
 
 def clean_string(data) -> str:
     """
@@ -327,8 +320,9 @@ def get_form_metadata(iaso: IASO, form_id: int):
         response = iaso.api_client.get(
             f"/api/forms/{form_id}", params={"fields": {"latest_form_version"}}
         )
-        response = response.json()
-        url = response.get("latest_form_version", {}).get("xls_file")
+        json_response = response.json()
+        
+        url = json_response.get("latest_form_version", {}).get("xls_file")
 
         df_choices = pd.read_excel(url, sheet_name="choices")
 
