@@ -29,12 +29,11 @@ from openhexa.toolbox.iaso import IASO
     required=True,
 )
 @parameter(
-    "save_to_database",
-    name="Save to database",
-    type=bool,
-    required=True,
-    default=True,
-    help="Save submissions data to database",
+    "db_table_name",
+    name="Database table name",
+    type=str,
+    required=False,
+    help="Target database table name for submissions (default: submissions_form_name)",
 )
 @parameter(
     "save_mode",
@@ -56,32 +55,30 @@ def iaso_extract_submissions(
     iaso_connection: IASOConnection,
     form_id: int,
     choices_to_labels: bool,
-    save_to_database: bool,
+    db_table_name: str,
     save_mode: str,
     dataset: Dataset,
 ):
     """Pipeline orchestration function for extracting and processing form submissions."""
-
-    if not any([save_to_database, dataset]):
-        current_run.log_error("No output destinations defined")
-        raise ValueError("No output destinations specified")
-
+    
     iaso = authenticate_iaso(iaso_connection)
 
     form_name = get_form_name(iaso, form_id)
 
-    df_submissions = fetch_form_submissions(iaso, form_id)
+    submissions = fetch_form_submissions(iaso, form_id)
 
     if choices_to_labels:
-        df_submissions = replace_choice_labels(iaso, df_submissions, form_id)
+        submissions = replace_choice_labels(iaso, submissions, form_id)
 
-    df_submissions = deduplicate_columns(df_submissions)
+    submissions = deduplicate_columns(submissions)
 
-    if save_to_database:
-        export_to_database(df_submissions, form_name, save_mode)
+    table_name = db_table_name or f"submissions_{form_name}"
+    export_to_database(submissions, table_name, save_mode)
 
     if dataset:
-        export_to_dataset(dataset, df_submissions, form_name)
+        export_to_dataset(dataset, submissions, form_name)
+    
+    current_run.log_info("Pipeline execution successful ✅")
 
 
 def authenticate_iaso(conn: IASOConnection) -> IASO:
@@ -152,23 +149,23 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
             current_run.log_error("No submissions found")
             raise
         try:
-            df_submissions = pl.read_csv(response.content)
+            submissions = pl.read_csv(response.content)
         except Exception as e:
             current_run.log_error(f"Error reading submissions form data: {e}")
             raise
-        return df_submissions
+        return submissions
     except Exception as e:
         current_run.log_error(f"Error fetching form submissions: {e}")
         raise
 
 
-def replace_choice_labels(iaso: IASO, df_submissions: pl.DataFrame, form_id: int) -> pl.DataFrame:
+def replace_choice_labels(iaso: IASO, submissions: pl.DataFrame, form_id: int) -> pl.DataFrame:
     """
     Replaces choice names with their corresponding labels in the DataFrame.
 
     Args:
         iaso (IASO): Authenticated IASO object.
-        df_submissions (pl.DataFrame): DataFrame containing form submissions.
+        submissions (pl.DataFrame): DataFrame containing form submissions.
         form_id (int): Form ID to retrieve metadata for.
 
     Returns:
@@ -179,7 +176,7 @@ def replace_choice_labels(iaso: IASO, df_submissions: pl.DataFrame, form_id: int
 
     if df_choices.is_empty():
         current_run.log_info("No choices label found in form metadata")
-        return df_submissions
+        return submissions
 
     try:
         choice_maps = {
@@ -187,11 +184,11 @@ def replace_choice_labels(iaso: IASO, df_submissions: pl.DataFrame, form_id: int
             for col in df_choices["list_name"].unique()
         }
 
-        df_submissions.with_columns(
+        submissions.with_columns(
             [
                 pl.col(col).map_dict(mapping).alias(col)
                 for col, mapping in choice_maps.items()
-                if col in df_submissions.columns
+                if col in submissions.columns
             ]
         )
 
@@ -201,20 +198,20 @@ def replace_choice_labels(iaso: IASO, df_submissions: pl.DataFrame, form_id: int
 
     current_run.log_info("Choice names have been successfully replaced with labels")
 
-    return df_submissions
+    return submissions
 
 
-def deduplicate_columns(df_submissions: pl.DataFrame) -> pl.DataFrame:
+def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
     """
     Renames duplicate columns in the DataFrame by appending a unique suffix.
 
     Args:
-        df_submissions (pl.DataFrame): DataFrame with potential duplicate columns.
+        submissions (pl.DataFrame): DataFrame with potential duplicate columns.
 
     Returns:
         pl.DataFrame: DataFrame with unique column names.
     """
-    cleaned_columns = [clean_string(col) for col in df_submissions.columns]
+    cleaned_columns = [clean_string(col) for col in submissions.columns]
     duplicates_columns = {
         k: list(range(1, cleaned_columns.count(k) + 1))
         for k in cleaned_columns
@@ -225,38 +222,39 @@ def deduplicate_columns(df_submissions: pl.DataFrame) -> pl.DataFrame:
             cleaned_columns[cleaned_columns.index(col)] = f"{col}_{duplicates_columns[col][0]}"
             duplicates_columns[col].remove(duplicates_columns[col][0])
 
-    df_submissions.columns = cleaned_columns
-    return df_submissions
+    submissions.columns = cleaned_columns
+    return submissions
 
 
-def export_to_database(df_submissions: pl.DataFrame, form_name: str, mode: str):
+def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) -> None:
     """
     Saves form submissions to a database if requested.
 
     Args:
         save_to_db (bool): Flag indicating whether to save to the database.
         save_mode (str): Mode to use when saving the table (replace or append).
-        df_submissions (pl.DataFrame): DataFrame containing the form submissions.
+        submissions (pl.DataFrame): DataFrame containing the form submissions.
         form_name (str): Name of the form.
     """
-
     current_run.log_info("Exporting form submissions to database")
-    df_submissions.write_database(
-        table_name=f"submissions_{form_name}",
+    submissions.write_database(
+        table_name=table_name,
         connection=workspace.database_url,
         if_table_exists=mode,
     )
-    current_run.add_database_output(f"submissions_{form_name}")
-    current_run.log_info(f"Form submissions saved to database as table submissions_{form_name}")
+    current_run.add_database_output(table_name)
+    current_run.log_info(
+        f"Form submissions saved to database {len(submissions)} rows to {table_name}"
+    )
 
 
-def export_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, form_name: str):
+def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: str):
     """
     Saves form submissions to the specified dataset.
 
     Args:
         output_dataset (Dataset): The dataset to store the submissions.
-        df_submissions (pl.DataFrame): DataFrame containing the submissions.
+        submissions (pl.DataFrame): DataFrame containing the submissions.
         form_name (str): Name of the form.
     """
 
@@ -269,7 +267,7 @@ def export_to_dataset(dataset: Dataset, df_submissions: pl.DataFrame, form_name:
     try:
         # Write to temporary file
         temp_file = output_dir / f"submissions_{form_name}_{timestamp}.csv"
-        df_submissions.write_csv(temp_file)
+        submissions.write_csv(temp_file)
 
         # Create/retrieve dataset version
         version_name = f"submissions_{form_name}"
