@@ -17,7 +17,7 @@ from openhexa.sdk import (
 from openhexa.toolbox.iaso import IASO, dataframe
 
 
-@pipeline(name="Extract IASO form metadata")
+@pipeline("__pipeline_id__", name="Extract IASO form metadata")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
 @parameter("form_id", name="Form ID", type=int, required=True)
 @parameter(
@@ -56,9 +56,7 @@ def iaso_extract_metadata(
     """
 
     iaso = authenticate_iaso(iaso_connection)
-    
     form_name = get_form_name(iaso, form_id)
-    
     metadata = fetch_form_metadata(iaso, form_id)
 
     table_name = db_table_name or f"metadata_{form_name}"
