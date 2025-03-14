@@ -1,4 +1,4 @@
-name: Push extract_submissions pipeline to OpenHEXA Workspaces
+name: Push extract_metadata pipeline to OpenHEXA Workspaces
 
 on:
   push:
