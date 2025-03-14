@@ -155,6 +155,11 @@ def export_to_database(data: pl.DataFrame, table_name: str, mode: str):
 
     current_run.log_info("Exporting form metadata to database")
     try:
+        # To export data to database to cast some columns to string
+        data = data.with_columns(
+            pl.col("choices_name").cast(pl.String),
+            pl.col("choices_label").cast(pl.String),
+        )
         data.write_database(
             table_name=table_name,
             connection=workspace.database_url,
