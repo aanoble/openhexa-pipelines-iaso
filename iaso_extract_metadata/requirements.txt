@@ -1,1 +1,1 @@
-openhexa.toolbox
+openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
