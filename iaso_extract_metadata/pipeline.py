@@ -105,7 +105,7 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
             "name": [v["name"] for v in questions.values()],
             "type": [v["type"] for v in questions.values()],
             "label": [v["label"] for v in questions.values()],
-            "list_name": [v["list_name"] for v in questions.values()],
+            # "list_name": [v["list_name"] for v in questions.values()],
             "calculate": [v["calculate"] for v in questions.values()],
         }
     )
@@ -117,21 +117,7 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
 
     choices_df = pl.DataFrame(choices_data, schema=["name", "choice_value", "choice_label"])
 
-    merged_df = questions_df.join(choices_df, on="name", how="left").select(
-        pl.col(["name", "type", "label", "calculate", "list_name"]),
-        pl.struct(
-            pl.col("choice_value").alias("value"), pl.col("choice_label").alias("label")
-        ).alias("choices"),
-    )
-
-    final_df = merged_df.with_columns(
-        pl.when(pl.col("choices").is_null())
-        .then(pl.lit(None))
-        .otherwise(pl.col("choices").struct.json_encode())
-        .alias("choices")
-    )
-
-    return final_df
+    return questions_df.join(choices_df, on="name")
 
 
 def get_form_name(iaso: IASO, form_id: int) -> str:
