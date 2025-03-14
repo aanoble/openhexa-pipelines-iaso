@@ -17,7 +17,7 @@ from openhexa.sdk import (
 from openhexa.toolbox.iaso import IASO, dataframe
 
 
-@pipeline("__pipeline_id__", name="Extract IASO form metadata")
+@pipeline(name="Extract IASO form metadata")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
 @parameter("form_id", name="Form ID", type=int, required=True)
 @parameter(
