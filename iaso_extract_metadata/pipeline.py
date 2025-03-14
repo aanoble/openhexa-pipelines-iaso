@@ -110,14 +110,28 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
         }
     )
     choices_data = [
-        (key, [row["name"] for row in choices_list], [row["label"] for row in choices_list])
+        (key, choice["name"], choice["label"])
         for key, choices_list in choices.items()
+        for choice in choices_list
     ]
 
-    choices_df = pl.DataFrame(
-        choices_data, schema=["name", "choices_name", "choices_label"]
+    choices_df = pl.DataFrame(choices_data, schema=["name", "choice_value", "choice_label"])
+
+    merged_df = questions_df.join(choices_df, on="name", how="left").select(
+        pl.col(["name", "type", "label", "calculate", "list_name"]),
+        pl.struct(
+            pl.col("choice_value").alias("value"), pl.col("choice_label").alias("label")
+        ).alias("choices"),
     )
-    return questions_df.join(choices_df, on="name", how="left")
+
+    final_df = merged_df.with_columns(
+        pl.when(pl.col("choices").is_null())
+        .then(pl.lit(None))
+        .otherwise(pl.col("choices").struct.json_encode())
+        .alias("choices")
+    )
+
+    return final_df
 
 
 def get_form_name(iaso: IASO, form_id: int) -> str:
@@ -202,7 +216,7 @@ def export_to_dataset(data: pl.DataFrame, dataset: Dataset, form_name: str):
         # Clean tempory files
         if file_path.exists():
             file_path.unlink()
-        
+
         output_dir.rmdir()
         Path(workspace.files_path, "iaso-pipelines").rmdir()
 
