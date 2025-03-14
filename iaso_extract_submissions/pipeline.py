@@ -283,6 +283,7 @@ def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: st
         )
     finally:
         output_dir.rmdir()
+        Path(workspace.files_path, "iaso-pipelines").rmdir()
 
 
 def clean_string(data) -> str:
