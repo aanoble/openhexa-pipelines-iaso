@@ -56,7 +56,9 @@ def iaso_extract_metadata(
     """
 
     iaso = authenticate_iaso(iaso_connection)
+    
     form_name = get_form_name(iaso, form_id)
+    
     metadata = fetch_form_metadata(iaso, form_id)
 
     table_name = db_table_name or f"metadata_{form_name}"
