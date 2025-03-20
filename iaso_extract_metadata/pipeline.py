@@ -26,7 +26,7 @@ from openhexa.toolbox.iaso import IASO, dataframe
     name="Database table name",
     type=str,
     required=False,
-    help="Target database table name for metadata (default: metadata_<form_name>)",
+    help="Target database table name for metadata (default: md_<form_name>)",
 )
 @parameter(
     "save_mode",
