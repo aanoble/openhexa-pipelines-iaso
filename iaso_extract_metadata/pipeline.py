@@ -59,10 +59,9 @@ def iaso_extract_metadata(
     iaso = authenticate_iaso(iaso_connection)
     form_name = get_form_name(iaso, form_id)
 
-    current_run.log_info(f"Fetching metadata for form {form_id} ({form_name})")
-    questions, choices = dataframe.get_form_metadata(iaso, form_id)
+    questions, choices = fetch_form_metadata(iaso, form_id)
 
-    table_name = db_table_name or f"metadata_{form_name}"
+    table_name = db_table_name or f"md_{form_name}"
     export_to_database(questions, choices, table_name, save_mode)
 
     if dataset:
@@ -112,6 +111,40 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         raise ValueError("Invalid form ID")
 
 
+def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
+    """
+    Fetches metadata for a form.
+
+    Args:
+        iaso (IASO): An authenticated IASO object.
+        form_id (int): The ID of the form to fetch metadata
+
+    Returns:
+        pl.DataFrame: Metadata for the form.
+    """
+    questions, choices = dataframe.get_form_metadata(iaso, form_id)
+
+    questions = pl.DataFrame(
+        {
+            "name": [v["name"] for v in questions.values()],
+            "type": [v["type"] for v in questions.values()],
+            "label": [v["label"] for v in questions.values()],
+            "calculate": [v["calculate"] for v in questions.values()],
+        }
+    ).sort("label")
+
+    choices = pl.DataFrame(
+        [
+            (key, choice["name"], choice["label"])
+            for key, choices_list in choices.items()
+            for choice in choices_list
+        ],
+        schema=["name", "choice_value", "choice_label"],
+    )
+
+    return questions, choices
+
+
 def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_name: str, mode: str):
     """
     Export metadata to a database table.
@@ -125,23 +158,7 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
 
     current_run.log_info("Exporting form metadata to database")
     try:
-        questions = pl.DataFrame(
-            {
-                "name": [v["name"] for v in questions.values()],
-                "type": [v["type"] for v in questions.values()],
-                "label": [v["label"] for v in questions.values()],
-                "calculate": [v["calculate"] for v in questions.values()],
-            }
-        )
-        choices = [
-            (key, choice["name"], choice["label"])
-            for key, choices_list in choices.items()
-            for choice in choices_list
-        ]
-
-        choices = pl.DataFrame(choices, schema=["name", "choice_value", "choice_label"])
-
-        metadata = questions.join(choices, on="name")
+        metadata = questions.join(choices, on="name").sort("label")
 
         metadata.write_database(
             table_name=table_name,
@@ -175,13 +192,13 @@ def export_to_dataset(
 
     try:
         # Write metadata to csv
-        file_path = output_dir / f"metadata_{form_name}_{timestamp}.xlsx"
+        file_path = output_dir / f"md_{form_name}_{timestamp}.xlsx"
         with xlsxwriter.Workbook(file_path) as workbook:
-            questions.write_excel(workbook, "Questions")
-            choices.write_excel(workbook, "Choices")
+            questions.write_excel(workbook, workbook.add_worksheet("Questions"))
+            choices.write_excel(workbook, workbook.add_worksheet("Choices"))
 
         # create/retreieve dataset version
-        version_name = f"metadata_{form_name}"
+        version_name = f"md_{form_name}"
         version = next((v for v in dataset.versions if v.name == version_name), None)
         version = version or dataset.create_version(version_name)
 
