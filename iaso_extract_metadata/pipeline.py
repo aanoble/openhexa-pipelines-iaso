@@ -66,11 +66,7 @@ def iaso_extract_metadata(
     export_to_database(questions, choices, table_name, save_mode)
 
     if dataset:
-<<<<<<< HEAD
         export_to_dataset(questions, choices, dataset, form_name)
-=======
-        export_to_dataset(questions, choices, dataset)
->>>>>>> cfdbea10dd5aecd0a2f341cb5529634b0922a8d3
 
     current_run.log_info("Pipeline execution successful ✅")
 
