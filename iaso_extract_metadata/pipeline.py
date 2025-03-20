@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import polars as pl
+import xlsxwriter
 from openhexa.sdk import (
     Dataset,
     IASOConnection,
@@ -57,13 +58,15 @@ def iaso_extract_metadata(
 
     iaso = authenticate_iaso(iaso_connection)
     form_name = get_form_name(iaso, form_id)
-    metadata = fetch_form_metadata(iaso, form_id)
+
+    current_run.log_info(f"Fetching metadata for form {form_id} ({form_name})")
+    questions, choices = dataframe.get_form_metadata(iaso, form_id)
 
     table_name = db_table_name or f"metadata_{form_name}"
-    export_to_database(metadata, table_name, save_mode)
+    export_to_database(questions, choices, table_name, save_mode)
 
     if dataset:
-        export_to_dataset(metadata, dataset)
+        export_to_dataset(questions, choices, dataset, form_name)
 
     current_run.log_info("Pipeline execution successful ✅")
 
@@ -85,39 +88,6 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
     except Exception as e:
         current_run.log_error(f"Authentication failed: {str(e)}")
         raise
-
-
-def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
-    """
-    Fetches metadata for a form.
-
-    Args:
-        iaso (IASO): An authenticated IASO object.
-        form_id (int): The ID of the form to fetch metadata
-
-    Returns:
-        pl.DataFrame: Metadata for the form.
-    """
-    questions, choices = dataframe.get_form_metadata(iaso, form_id)
-
-    questions_df = pl.DataFrame(
-        {
-            "name": [v["name"] for v in questions.values()],
-            "type": [v["type"] for v in questions.values()],
-            "label": [v["label"] for v in questions.values()],
-            # "list_name": [v["list_name"] for v in questions.values()],
-            "calculate": [v["calculate"] for v in questions.values()],
-        }
-    )
-    choices_data = [
-        (key, choice["name"], choice["label"])
-        for key, choices_list in choices.items()
-        for choice in choices_list
-    ]
-
-    choices_df = pl.DataFrame(choices_data, schema=["name", "choice_value", "choice_label"])
-
-    return questions_df.join(choices_df, on="name")
 
 
 def get_form_name(iaso: IASO, form_id: int) -> str:
@@ -142,19 +112,38 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         raise ValueError("Invalid form ID")
 
 
-def export_to_database(data: pl.DataFrame, table_name: str, mode: str):
+def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_name: str, mode: str):
     """
     Export metadata to a database table.
 
     Args:
-        data (pl.DataFrame): Metadata to export.
+        questions (pl.DataFrame): Metadata questions.
+        choices (pl.DataFrame): Metadata choices.
         table_name (str): Name of the database table.
         mode (str): Save mode for the table.
     """
 
     current_run.log_info("Exporting form metadata to database")
     try:
-        data.write_database(
+        questions = pl.DataFrame(
+            {
+                "name": [v["name"] for v in questions.values()],
+                "type": [v["type"] for v in questions.values()],
+                "label": [v["label"] for v in questions.values()],
+                "calculate": [v["calculate"] for v in questions.values()],
+            }
+        )
+        choices = [
+            (key, choice["name"], choice["label"])
+            for key, choices_list in choices.items()
+            for choice in choices_list
+        ]
+
+        choices = pl.DataFrame(choices, schema=["name", "choice_value", "choice_label"])
+
+        metadata = questions.join(choices, on="name")
+
+        metadata.write_database(
             table_name=table_name,
             connection=workspace.database_url,
             if_table_exists=mode,
@@ -166,12 +155,15 @@ def export_to_database(data: pl.DataFrame, table_name: str, mode: str):
         raise
 
 
-def export_to_dataset(data: pl.DataFrame, dataset: Dataset, form_name: str):
+def export_to_dataset(
+    questions: pl.DataFrame, choices: pl.DataFrame, dataset: Dataset, form_name: str
+):
     """
     Export metadata to a dataset.
 
     Args:
-        data (pl.DataFrame): Metadata to export.
+        questions (pl.DataFrame): Metadata questions to export.
+        choices (pl.DataFrame): Metadata choices to export.
         dataset (Dataset): Dataset to export to.
         form_name (str): Name of the form.
     """
@@ -183,8 +175,10 @@ def export_to_dataset(data: pl.DataFrame, dataset: Dataset, form_name: str):
 
     try:
         # Write metadata to csv
-        file_path = output_dir / f"metadata_{form_name}_{timestamp}.csv"
-        data.write_csv(file_path)
+        file_path = output_dir / f"metadata_{form_name}_{timestamp}.xlsx"
+        with xlsxwriter.Workbook(file_path) as workbook:
+            questions.write_excel(workbook, "Questions")
+            choices.write_excel(workbook, "Choices")
 
         # create/retreieve dataset version
         version_name = f"metadata_{form_name}"
