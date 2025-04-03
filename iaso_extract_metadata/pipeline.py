@@ -18,7 +18,7 @@ from openhexa.sdk import (
 from openhexa.toolbox.iaso import IASO, dataframe
 
 
-@pipeline("__pipeline_id__", name="Extract IASO form metadata")
+@pipeline("iaso_extract_metadata")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
 @parameter("form_id", name="Form ID", type=int, required=True)
 @parameter(
@@ -53,9 +53,9 @@ def iaso_extract_metadata(
 ):
     """Main pipeline to extract IASO form metadata.
 
-    Pipeline functions should only call tasks and should never perform IO operations or expensive computations.
+    Pipeline functions should only call tasks and should never perform 
+    IO operations or expensive computations.
     """
-
     iaso = authenticate_iaso(iaso_connection)
     form_name = get_form_name(iaso, form_id)
 
@@ -71,8 +71,7 @@ def iaso_extract_metadata(
 
 
 def authenticate_iaso(conn: IASOConnection) -> IASO:
-    """
-    Authenticates and returns an IASO object.
+    """Authenticates and returns an IASO object.
 
     Args:
         conn (IASOConnection): IASO connection details.
@@ -85,13 +84,12 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
         current_run.log_info("IASO authentication successful")
         return iaso
     except Exception as e:
-        current_run.log_error(f"Authentication failed: {str(e)}")
+        current_run.log_error(f"Authentication failed: {e}")
         raise
 
 
 def get_form_name(iaso: IASO, form_id: int) -> str:
-    """
-    Retrieve and sanitize form name.
+    """Retrieve and sanitize form name.
 
     Args:
         iaso (IASO): An authenticated IASO object.
@@ -107,13 +105,12 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         response = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": {"name"}})
         return clean_string(response.json().get("name"))
     except Exception as e:
-        current_run.log_error(f"Form fetch failed: {str(e)}")
-        raise ValueError("Invalid form ID")
+        current_run.log_error(f"Form fetch failed: {e}")
+        raise ValueError("Invalid form ID") from e
 
 
 def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
-    """
-    Fetches metadata for a form.
+    """Fetches metadata for a form.
 
     Args:
         iaso (IASO): An authenticated IASO object.
@@ -146,8 +143,7 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
 
 
 def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_name: str, mode: str):
-    """
-    Export metadata to a database table.
+    """Export metadata to a database table.
 
     Args:
         questions (pl.DataFrame): Metadata questions.
@@ -155,7 +151,6 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
         table_name (str): Name of the database table.
         mode (str): Save mode for the table.
     """
-
     current_run.log_info("Exporting form metadata to database")
     try:
         metadata = questions.join(choices, on="name").sort("label")
@@ -168,15 +163,14 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
         current_run.add_database_output(table_name)
         current_run.log_info(f"Metadata saved to database table {table_name}")
     except Exception as e:
-        current_run.log_error(f"Database export failed: {str(e)}")
+        current_run.log_error(f"Database export failed: {e}")
         raise
 
 
 def export_to_dataset(
     questions: pl.DataFrame, choices: pl.DataFrame, dataset: Dataset, form_name: str
 ):
-    """
-    Export metadata to a dataset.
+    """Export metadata to a dataset.
 
     Args:
         questions (pl.DataFrame): Metadata questions to export.
@@ -184,7 +178,6 @@ def export_to_dataset(
         dataset (Dataset): Dataset to export to.
         form_name (str): Name of the form.
     """
-
     current_run.log_info(f"Exporting form metadata to dataset {dataset.name}")
     timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
     output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-metadata")
@@ -207,7 +200,7 @@ def export_to_dataset(
 
         current_run.log_info(f"Metadata saved to dataset {dataset.name} in {version.name} version")
     except Exception as e:
-        current_run.log_error(f"Dataset export failed: {str(e)}")
+        current_run.log_error(f"Dataset export failed: {e}")
         raise
     finally:
         # Clean tempory files
@@ -218,21 +211,19 @@ def export_to_dataset(
         Path(workspace.files_path, "iaso-pipelines").rmdir()
 
 
-def clean_string(data) -> str:
-    """
-    Cleans the input string by removing unwanted characters and formatting it
+def clean_string(data: str) -> str:
+    """Cleans the input string by removing unwanted characters and formatting it.
 
     Args:
         data (str): The input string to be cleaned.
+
     Returns:
         str: The cleaned string.
     """
-
     data = unicodedata.normalize("NFD", data)
     data = "".join(c for c in data if not unicodedata.combining(c))
     # Precompile regex patterns for performance
-    data = re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
-    return data
+    return re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
 
 
 if __name__ == "__main__":

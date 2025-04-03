@@ -1,10 +1,12 @@
-name: Push extract-metadata pipelines to OpenHEXA Workspaces
+name: Push extract-metadata pipelines to OpenHEXA Workspace
 
 on:
   push:
     paths:
       - ".github/workflows/push-iaso-extract-metadata.yml"
       - "iaso_extract_metadata/**"
+      - "!iaso_extract_metadata/docs/**"
+      - "!iaso_extract_metadata/docs/README.md"
     branches:
       - main
 
@@ -13,7 +15,7 @@ jobs:
     strategy:
       matrix:
         pipeline: [
-          {"workspace": "civ-pnlp-f01048", "pipeline_id": "iaso_extract_metadata", "token": OH_TOKEN_CIV_PNLP},
+          {"workspace": "civ-pnlp-f01048", "token": OH_TOKEN_CIV_PNLP},
         ]
         
     runs-on: ubuntu-latest
@@ -34,8 +36,8 @@ jobs:
           
       - name: Push pipeline to OpenHEXA
         run: |
-          sed -i "s/__pipeline_id__/${{ matrix.pipeline.pipeline_id }}/g" iaso_extract_metadata/pipeline.py && \
           openhexa pipelines push iaso_extract_metadata \
-            -n ${{ github.sha }} \
-            -l "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
+            --code "iaso_extract_metadata"
+            --description "${{ github.event.head_commit.message }}" \
+            -link "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
             --yes

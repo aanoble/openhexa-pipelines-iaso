@@ -18,7 +18,7 @@ from openhexa.sdk import (
 from openhexa.toolbox.iaso import IASO
 
 
-@pipeline("__pipeline_id__", name="Extract IASO form submissions")
+@pipeline("iaso_extract_submissions")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
 @parameter("form_id", name="Form ID", type=int, required=True)
 @parameter(
@@ -60,7 +60,6 @@ def iaso_extract_submissions(
     dataset: Dataset,
 ):
     """Pipeline orchestration function for extracting and processing form submissions."""
-    
     iaso = authenticate_iaso(iaso_connection)
 
     form_name = get_form_name(iaso, form_id)
@@ -77,13 +76,12 @@ def iaso_extract_submissions(
 
     if dataset:
         export_to_dataset(dataset, submissions, form_name)
-    
+
     current_run.log_info("Pipeline execution successful ✅")
 
 
 def authenticate_iaso(conn: IASOConnection) -> IASO:
-    """
-    Authenticates and returns an IASO object.
+    """Authenticates and returns an IASO object.
 
     Args:
         conn (IASOConnection): IASO connection details.
@@ -96,13 +94,12 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
         current_run.log_info("IASO authentication successful")
         return iaso
     except Exception as e:
-        current_run.log_error(f"Authentication failed: {str(e)}")
-        raise
+        current_run.log_error(f"Authentication failed: {e}")
+        raise ValueError("No submissions found") from e
 
 
 def get_form_name(iaso: IASO, form_id: int) -> str:
-    """
-    Retrieve and sanitize form name.
+    """Retrieve and sanitize form name.
 
     Args:
         iaso (IASO): An authenticated IASO object.
@@ -118,13 +115,12 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         response = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": {"name"}})
         return clean_string(response.json().get("name"))
     except Exception as e:
-        current_run.log_error(f"Form fetch failed: {str(e)}")
-        raise ValueError("Invalid form ID")
+        current_run.log_error(f"Form fetch failed: {e}")
+        raise ValueError("Invalid form ID") from e
 
 
 def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
-    """
-    Retrieves form submissions as a Polars DataFrame from the IASO API.
+    """Retrieves form submissions as a Polars DataFrame from the IASO API.
 
     Args:
         iaso (IASO): Authenticated IASO object.
@@ -136,7 +132,6 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
     Raises:
         Exception: If an error occurs while fetching the form submissions.
     """
-
     try:
         current_run.log_info("Fetch form submissions data")
         params = {
@@ -147,7 +142,7 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
 
         if not response.content:
             current_run.log_error("No submissions found")
-            raise
+            raise ValueError("No submissions found")
         try:
             submissions = pl.read_csv(response.content)
         except Exception as e:
@@ -160,8 +155,7 @@ def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
 
 
 def replace_choice_labels(iaso: IASO, submissions: pl.DataFrame, form_id: int) -> pl.DataFrame:
-    """
-    Replaces choice names with their corresponding labels in the DataFrame.
+    """Replaces choice names with their corresponding labels in the DataFrame.
 
     Args:
         iaso (IASO): Authenticated IASO object.
@@ -171,7 +165,6 @@ def replace_choice_labels(iaso: IASO, submissions: pl.DataFrame, form_id: int) -
     Returns:
         pl.DataFrame: DataFrame with choice names replaced by labels.
     """
-
     df_choices = fetch_form_choices(iaso, form_id)
 
     if df_choices.is_empty():
@@ -180,7 +173,7 @@ def replace_choice_labels(iaso: IASO, submissions: pl.DataFrame, form_id: int) -
 
     try:
         choice_maps = {
-            col: dict(zip(df_choices["name"], df_choices["label"]))
+            col: dict(zip(df_choices["name"], df_choices["label"], strict=False))
             for col in df_choices["list_name"].unique()
         }
 
@@ -194,7 +187,7 @@ def replace_choice_labels(iaso: IASO, submissions: pl.DataFrame, form_id: int) -
 
     except Exception as e:
         current_run.log_error(f"Error replacing choice names with labels: {e}")
-        raise ValueError("Error replacing choice names with labels")
+        raise ValueError("Error replacing choice names with labels") from e
 
     current_run.log_info("Choice names have been successfully replaced with labels")
 
@@ -202,8 +195,7 @@ def replace_choice_labels(iaso: IASO, submissions: pl.DataFrame, form_id: int) -
 
 
 def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
-    """
-    Renames duplicate columns in the DataFrame by appending a unique suffix.
+    """Renames duplicate columns in the DataFrame by appending a unique suffix.
 
     Args:
         submissions (pl.DataFrame): DataFrame with potential duplicate columns.
@@ -217,9 +209,10 @@ def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
         for k in cleaned_columns
         if cleaned_columns.count(k) != 1
     }
-    for col in cleaned_columns:
+    for col in cleaned_columns[:]:  # Iterate over a copy of the list
         if col in duplicates_columns:
-            cleaned_columns[cleaned_columns.index(col)] = f"{col}_{duplicates_columns[col][0]}"
+            index = cleaned_columns.index(col)
+            cleaned_columns[index] = f"{col}_{duplicates_columns[col][0]}"
             duplicates_columns[col].remove(duplicates_columns[col][0])
 
     submissions.columns = cleaned_columns
@@ -227,14 +220,12 @@ def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
 
 
 def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) -> None:
-    """
-    Saves form submissions to a database if requested.
+    """Saves form submissions to a database.
 
     Args:
-        save_to_db (bool): Flag indicating whether to save to the database.
-        save_mode (str): Mode to use when saving the table (replace or append).
         submissions (pl.DataFrame): DataFrame containing the form submissions.
-        form_name (str): Name of the form.
+        table_name (str): Name of the database table where submissions will be saved.
+        mode (str): Mode to use when saving the table (replace or append).
     """
     current_run.log_info("Exporting form submissions to database")
     submissions.write_database(
@@ -249,15 +240,13 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
 
 
 def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: str):
-    """
-    Saves form submissions to the specified dataset.
+    """Saves form submissions to the specified dataset.
 
     Args:
-        output_dataset (Dataset): The dataset to store the submissions.
+        dataset (Dataset): The dataset where the submissions will be stored.
         submissions (pl.DataFrame): DataFrame containing the submissions.
         form_name (str): Name of the form.
     """
-
     current_run.log_info(f"Export form submissions to dataset {dataset.name}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
@@ -279,33 +268,31 @@ def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: st
         temp_file.unlink()
 
         current_run.log_info(
-            f"Form submissions successfully saved to {dataset.name} dataset in {version.name} version"
+            f"Form submissions successfully saved to {dataset.name} dataset "
+            f"in {version.name} version"
         )
     finally:
         output_dir.rmdir()
         Path(workspace.files_path, "iaso-pipelines").rmdir()
 
 
-def clean_string(data) -> str:
-    """
-    Cleans the input string by removing unwanted characters and formatting it
+def clean_string(data: str) -> str:
+    """Cleans the input string by removing unwanted characters and formatting it.
 
     Args:
         data (str): The input string to be cleaned.
+
     Returns:
         str: The cleaned string.
     """
-
     data = unicodedata.normalize("NFD", data)
     data = "".join(c for c in data if not unicodedata.combining(c))
     # Precompile regex patterns for performance
-    data = re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
-    return data
+    return re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
 
 
 def fetch_form_choices(iaso: IASO, form_id: int) -> pl.DataFrame:
-    """
-    Retrieves form metadata from IASO API.
+    """Retrieves form metadata from IASO API.
 
     Args:
         iaso (IASO): Authenticated IASO object.
@@ -327,7 +314,7 @@ def fetch_form_choices(iaso: IASO, form_id: int) -> pl.DataFrame:
             .reset_index(drop=True)
         )
     except Exception as e:
-        current_run.log_warning(f"Choice metadata incomplete: {str(e)}")
+        current_run.log_warning(f"Choice metadata incomplete: {e}")
         return pl.DataFrame()
 
 
