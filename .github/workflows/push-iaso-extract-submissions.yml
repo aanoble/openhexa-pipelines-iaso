@@ -39,5 +39,5 @@ jobs:
           openhexa pipelines push iaso_extract_submissions \
             --code "iaso_extract_submissions" \
             --description "${{ github.event.head_commit.message }}" \
-            -l "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
+            --link "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
             --yes
