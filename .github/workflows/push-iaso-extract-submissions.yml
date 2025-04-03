@@ -12,12 +12,6 @@ on:
 
 jobs:
   deploy:
-    strategy:
-      matrix:
-        pipeline: [
-          {"workspace": "civ-pnlp-f01048", "token": OH_TOKEN_CIV_PNLP},
-        ]
-        
     runs-on: ubuntu-latest
 
     steps:
@@ -31,8 +25,8 @@ jobs:
       - name: Configure OpenHEXA CLI
         uses: blsq/openhexa-cli-action@v1
         with:
-          workspace: ${{ matrix.pipeline.workspace }}
-          token: ${{ secrets[matrix.pipeline.token] }}
+          workspace: "civ-pnlp-f01048"
+          token: ${{ secrets.OH_TOKEN_CIV_PNLP }}
           
       - name: Push pipeline to OpenHEXA
         run: |
