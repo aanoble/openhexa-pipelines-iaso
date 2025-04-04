@@ -45,7 +45,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     "db_table_name",
     name="Database table name",
     type=str,
-    required=True,
+    required=False,
     help=(
         "Target table name for organization units storage"
         "(default if ou_id is define: ou_<ou_type_name>, else <orgunits>)"
@@ -65,13 +65,12 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     name="Output Dataset",
     required=False,
     type=Dataset,
-    default=True,
     help="Target dataset for geopackage export",
 )
 def iaso_extract_orgunits(
     iaso_connection: IASOConnection,
     ou_id: int | None,
-    db_table_name: str,
+    db_table_name: str | None,
     save_mode: str,
     dataset: Dataset | None,
 ) -> None:
@@ -85,15 +84,13 @@ def iaso_extract_orgunits(
         dataset: Optional dataset for geopackage export
     """
     current_run.log_info("Starting IASO organizational units extraction pipeline")
-
     iaso_client = authenticate_iaso(iaso_connection)
-    org_units_df = fetch_organization_units(iaso_client, ou_id)
+    org_units_df = fetch_org_units(iaso_client, ou_id)
     geo_df = export_to_database(org_units_df, ou_id, db_table_name, save_mode)
     export_to_dataset(geo_df, ou_id, dataset, db_table_name)
-    current_run.log_info("Pipeline execution successful ✅")
 
 
-@iaso_extract_orgunits.task
+# @iaso_extract_orgunits.task
 def authenticate_iaso(connection: IASOConnection) -> IASO:
     """Establish authenticated connection to IASO API.
 
@@ -108,7 +105,7 @@ def authenticate_iaso(connection: IASOConnection) -> IASO:
     """
     try:
         iaso = IASO(connection.url, connection.username, connection.password)
-        current_run.log_info("Successfully authenticated with IASO API")
+        current_run.log_info("IASO authentication successful")
         return iaso
     except Exception as err:
         error_msg = f"IASO authentication failed: {err}"
@@ -116,8 +113,8 @@ def authenticate_iaso(connection: IASOConnection) -> IASO:
         raise RuntimeError(error_msg) from err
 
 
-@iaso_extract_orgunits.task
-def fetch_organization_units(iaso_client: IASO, org_unit_id: int | None) -> pl.DataFrame:
+# @iaso_extract_orgunits.task
+def fetch_org_units(iaso_client: IASO, org_unit_id: int | None) -> pl.DataFrame:
     """Retrieve organizational units data from IASO.
 
     Args:
@@ -130,6 +127,7 @@ def fetch_organization_units(iaso_client: IASO, org_unit_id: int | None) -> pl.D
     Raises:
         ValueError: If specified org unit ID is not found
     """
+    # current_run.log_info(f"{iaso_client.api_client.server_url}")
     try:
         if org_unit_id:
             response = iaso_client.api_client.get("/api/orgunittypes")
@@ -152,11 +150,11 @@ def fetch_organization_units(iaso_client: IASO, org_unit_id: int | None) -> pl.D
         raise
 
 
-@iaso_extract_orgunits.task
+# @iaso_extract_orgunits.task
 def export_to_database(
     org_units_df: pl.DataFrame,
     org_unit_id: int | None,
-    table_name: str,
+    table_name: str | None,
     save_mode: str,
 ) -> gpd.GeoDataFrame:
     """Export organizational units data to spatial database.
@@ -164,7 +162,7 @@ def export_to_database(
     Args:
         org_units_df: Organizational units data
         org_unit_id: Optional specific organization unit ID
-        table_name: Target database table name
+        table_name: Optional Target database table name
         save_mode: Database write mode
 
     Returns:
@@ -173,7 +171,7 @@ def export_to_database(
     Raises:
         RuntimeError: If database export fails
     """
-    current_run.log_info(f"Exporting to database table '{table_name}'")
+    current_run.log_info("Exporting to database table")
 
     try:
         final_table = _generate_table_name(table_name, org_units_df, org_unit_id)
@@ -183,7 +181,7 @@ def export_to_database(
         geo_df.to_postgis(final_table, engine, if_exists=save_mode)
 
         current_run.add_database_output(final_table)
-        current_run.log_info(f"Successfully exported {len(geo_df)} units to {final_table}")
+        current_run.log_info(f"Successfully exported {len(geo_df)} units to `{final_table}`")
         return geo_df
 
     except Exception as err:
@@ -191,7 +189,7 @@ def export_to_database(
         raise RuntimeError("Database export operation failed") from err
 
 
-@iaso_extract_orgunits.task
+# @iaso_extract_orgunits.task
 def export_to_dataset(
     geo_df: gpd.GeoDataFrame,
     org_unit_id: int | None,
@@ -210,6 +208,7 @@ def export_to_dataset(
         RuntimeError: If dataset export fails
     """
     if not dataset:
+        current_run.log_info("Pipeline execution successful ✅")
         return
 
     try:
@@ -220,7 +219,10 @@ def export_to_dataset(
         version = _get_or_create_dataset_version(dataset, final_name)
         version.add_file(output_path)
 
-        current_run.log_info(f"Exported {len(geo_df)} units to dataset {dataset.name}")
+        current_run.log_info(
+            f"Exported {len(geo_df)} units to dataset `{dataset.name}` in `{version.name}` version"
+        )
+        current_run.log_info("Pipeline execution successful ✅")
 
     except Exception as err:
         current_run.log_error(f"Dataset export failed: {err}")
