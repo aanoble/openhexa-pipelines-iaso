@@ -1,11 +1,12 @@
-"""Template for newly generated pipelines."""
+"""Pipeline for extracting and processing form submissions from IASO."""
+
+from __future__ import annotations
 
 import re
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 from openhexa.sdk import (
     Dataset,
@@ -15,69 +16,85 @@ from openhexa.sdk import (
     pipeline,
     workspace,
 )
-from openhexa.toolbox.iaso import IASO
+from openhexa.toolbox.iaso import IASO, dataframe
+
+# Precompile regex pattern for string cleaning
+CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 
 
 @pipeline("iaso_extract_submissions")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
 @parameter("form_id", name="Form ID", type=int, required=True)
 @parameter(
+    "last_updated",
+    name="Last Updated Date",
+    type=str,
+    required=False,
+    help="ISO formatted date (YYYY-MM-DD) for incremental data extraction",
+)
+@parameter(
     "choices_to_labels",
-    name="Replace choice names with labels?",
+    name="Convert Choices to Labels",
     type=bool,
-    default=False,
-    required=True,
+    default=True,
+    required=False,
+    help="Replace choice codes with labels",
 )
 @parameter(
     "db_table_name",
     name="Database table name",
     type=str,
     required=False,
-    help="Target database table name for submissions (default: submissions_form_name)",
+    help="Target database table name (default: form_<form_name>)",
 )
 @parameter(
     "save_mode",
-    name="Saving mode",
+    name="Save Mode",
     type=str,
     required=True,
     choices=["append", "replace"],
     default="replace",
-    help="Select mode if table exists",
+    help="Database write behavior for existing tables",
 )
 @parameter(
     "dataset",
-    name="Output dataset",
+    name="Output Dataset",
     type=Dataset,
     required=False,
-    help="Dataset to store submissions data",
+    help="Target dataset for CSV output storage",
 )
 def iaso_extract_submissions(
     iaso_connection: IASOConnection,
     form_id: int,
-    choices_to_labels: bool,
-    db_table_name: str,
+    last_updated: str | None,
+    choices_to_labels: bool | None,
+    db_table_name: str | None,
     save_mode: str,
-    dataset: Dataset,
+    dataset: Dataset | None,
 ):
     """Pipeline orchestration function for extracting and processing form submissions."""
-    iaso = authenticate_iaso(iaso_connection)
+    current_run.log_info("Starting form submissions extraction pipeline")
 
-    form_name = get_form_name(iaso, form_id)
+    try:
+        iaso = authenticate_iaso(iaso_connection)
+        form_name = get_form_name(iaso, form_id)
+        cutoff_date = parse_cutoff_date(last_updated)
 
-    submissions = fetch_form_submissions(iaso, form_id)
+        submissions = fetch_submissions(iaso, form_id, cutoff_date)
+        submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
+        submissions = deduplicate_columns(submissions)
 
-    if choices_to_labels:
-        submissions = replace_choice_labels(iaso, submissions, form_id)
+        table_name = db_table_name or f"form_{form_name}"
+        export_to_database(submissions, table_name, save_mode)
 
-    submissions = deduplicate_columns(submissions)
+        if dataset:
+            export_to_dataset(dataset, submissions, form_name)
 
-    table_name = db_table_name or f"submissions_{form_name}"
-    export_to_database(submissions, table_name, save_mode)
+        current_run.log_info("Pipeline execution successful ✅")
 
-    if dataset:
-        export_to_dataset(dataset, submissions, form_name)
-
-    current_run.log_info("Pipeline execution successful ✅")
+    except Exception as exc:
+        current_run.log_error(f"Pipeline failed: {exc}")
+        raise
 
 
 def authenticate_iaso(conn: IASOConnection) -> IASO:
@@ -93,9 +110,10 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
         iaso = IASO(conn.url, conn.username, conn.password)
         current_run.log_info("IASO authentication successful")
         return iaso
-    except Exception as e:
-        current_run.log_error(f"Authentication failed: {e}")
-        raise ValueError("No submissions found") from e
+    except Exception as exc:
+        error_msg = f"IASO authentication failed: {exc}"
+        current_run.log_error(error_msg)
+        raise RuntimeError(error_msg) from exc
 
 
 def get_form_name(iaso: IASO, form_id: int) -> str:
@@ -119,86 +137,83 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         raise ValueError("Invalid form ID") from e
 
 
-def fetch_form_submissions(iaso: IASO, form_id: int) -> pl.DataFrame:
-    """Retrieves form submissions as a Polars DataFrame from the IASO API.
+def parse_cutoff_date(date_str: str | None) -> str | None:
+    """Validate and parse ISO date string.
 
     Args:
-        iaso (IASO): Authenticated IASO object.
-        form_id (int): Form ID for which submissions are fetched.
+        date_str: Input date string in YYYY-MM-DD format
 
     Returns:
-        pl.DataFrame: DataFrame containing the form submissions.
+        Validated date string or None
 
     Raises:
-        Exception: If an error occurs while fetching the form submissions.
+        ValueError: For invalid date formats
+    """
+    if not date_str:
+        return None
+
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError as exc:
+        current_run.log_error("Invalid date format - must be YYYY-MM-DD")
+        raise ValueError("Invalid date format") from exc
+
+
+def fetch_submissions(
+    iaso: IASO,
+    form_id: int,
+    cutoff_date: str | None,
+) -> pl.DataFrame:
+    """Retrieve form submissions from IASO API.
+
+    Args:
+        iaso: Authenticated IASO client
+        form_id: Target form identifier
+        cutoff_date: Optional date filter
+
+    Returns:
+        DataFrame containing form submissions
     """
     try:
-        current_run.log_info("Fetch form submissions data")
-        params = {
-            "csv": True,
-            "form_ids": form_id,
-        }
-        response = iaso.api_client.get("/api/instances/", params=params)
-
-        if not response.content:
-            current_run.log_error("No submissions found")
-            raise ValueError("No submissions found")
-        try:
-            submissions = pl.read_csv(response.content)
-        except Exception as e:
-            current_run.log_error(f"Error reading submissions form data: {e}")
-            raise
-        return submissions
-    except Exception as e:
-        current_run.log_error(f"Error fetching form submissions: {e}")
+        current_run.log_info(f"Fetching submissions for form ID {form_id}")
+        return dataframe.extract_submissions(iaso, form_id, cutoff_date)
+    except Exception as exc:
+        current_run.log_error(f"Submission retrieval failed: {exc}")
         raise
 
 
-def replace_choice_labels(iaso: IASO, submissions: pl.DataFrame, form_id: int) -> pl.DataFrame:
-    """Replaces choice names with their corresponding labels in the DataFrame.
+def process_choices(
+    submissions: pl.DataFrame, convert: bool, iaso_client: IASO, form_id: int
+) -> pl.DataFrame:
+    """Convert choice codes to human-readable labels if requested.
 
     Args:
-        iaso (IASO): Authenticated IASO object.
-        submissions (pl.DataFrame): DataFrame containing form submissions.
-        form_id (int): Form ID to retrieve metadata for.
+        submissions: Raw submissions DataFrame
+        convert: Conversion flag
+        iaso_client: Authenticated IASO client
+        form_id: Target form identifier
 
     Returns:
-        pl.DataFrame: DataFrame with choice names replaced by labels.
+        Processed DataFrame with labels if requested
     """
-    df_choices = fetch_form_choices(iaso, form_id)
-
-    if df_choices.is_empty():
-        current_run.log_info("No choices label found in form metadata")
+    if not convert:
         return submissions
 
     try:
-        choice_maps = {
-            col: dict(zip(df_choices["name"], df_choices["label"], strict=False))
-            for col in df_choices["list_name"].unique()
-        }
-
-        submissions.with_columns(
-            [
-                pl.col(col).map_dict(mapping).alias(col)
-                for col, mapping in choice_maps.items()
-                if col in submissions.columns
-            ]
+        questions, choices = dataframe.get_form_metadata(iaso_client, form_id)
+        return dataframe.replace_labels(
+            submissions=submissions, questions=questions, choices=choices, language="French"
         )
-
-    except Exception as e:
-        current_run.log_error(f"Error replacing choice names with labels: {e}")
-        raise ValueError("Error replacing choice names with labels") from e
-
-    current_run.log_info("Choice names have been successfully replaced with labels")
-
-    return submissions
+    except Exception as exc:
+        current_run.log_error(f"Choice conversion failed: {exc}")
+        raise
 
 
 def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
     """Renames duplicate columns in the DataFrame by appending a unique suffix.
 
     Args:
-        submissions (pl.DataFrame): DataFrame with potential duplicate columns.
+        submissions: DataFrame with potential duplicate columns.
 
     Returns:
         pl.DataFrame: DataFrame with unique column names.
@@ -223,20 +238,21 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
     """Saves form submissions to a database.
 
     Args:
-        submissions (pl.DataFrame): DataFrame containing the form submissions.
-        table_name (str): Name of the database table where submissions will be saved.
-        mode (str): Mode to use when saving the table (replace or append).
+        submissions: DataFrame containing the form submissions.
+        table_name: Name of the database table where submissions will be saved.
+        mode: Mode to use when saving the table (replace or append).
     """
-    current_run.log_info("Exporting form submissions to database")
-    submissions.write_database(
-        table_name=table_name,
-        connection=workspace.database_url,
-        if_table_exists=mode,
-    )
-    current_run.add_database_output(table_name)
-    current_run.log_info(
-        f"Form submissions saved to database {len(submissions)} rows to {table_name}"
-    )
+    submissions = _process_submissions(submissions)
+    if _validate_schema(submissions, table_name):
+        submissions.write_database(
+            table_name=table_name,
+            connection=workspace.database_url,
+            if_table_exists=mode,
+        )
+        current_run.add_database_output(table_name)
+        current_run.log_info(
+            f"Form submissions saved to database {len(submissions)} rows into {table_name}"
+        )
 
 
 def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: str):
@@ -249,73 +265,116 @@ def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: st
     """
     current_run.log_info(f"Export form submissions to dataset {dataset.name}")
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
-    output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
-    output_dir.mkdir(exist_ok=True, parents=True)
-
     try:
-        # Write to temporary file
-        temp_file = output_dir / f"submissions_{form_name}_{timestamp}.csv"
-        submissions.write_csv(temp_file)
-
-        # Create/retrieve dataset version
-        version_name = f"submissions_{form_name}"
+        output_path = _prepare_output_path(form_name)
+        version_name = f"form_{form_name}"
         version = next((v for v in dataset.versions if v.name == version_name), None)
         version = version or dataset.create_version(version_name)
-
-        # Add and cleannup
-        version.add_file(temp_file)
-        temp_file.unlink()
-
+        version.add_file(output_path)
         current_run.log_info(
             f"Form submissions successfully saved to {dataset.name} dataset "
             f"in {version.name} version"
         )
     finally:
-        output_dir.rmdir()
-        Path(workspace.files_path, "iaso-pipelines").rmdir()
+        _clean_temp_files(output_path)
 
 
-def clean_string(data: str) -> str:
-    """Cleans the input string by removing unwanted characters and formatting it.
-
-    Args:
-        data (str): The input string to be cleaned.
+def _process_submissions(submissions: pl.DataFrame) -> pl.DataFrame:
+    """Process and clean the submissions DataFrame.
 
     Returns:
-        str: The cleaned string.
+        pl.DataFrame: The cleaned and processed submissions DataFrame.
     """
-    data = unicodedata.normalize("NFD", data)
-    data = "".join(c for c in data if not unicodedata.combining(c))
-    # Precompile regex patterns for performance
-    return re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
+    list_cols = submissions.select(pl.col(pl.List(pl.Utf8))).columns
+
+    binary_exprs = []
+    for col in list_cols:
+        unique_cats = submissions[col].drop_nulls().explode().drop_nulls().unique().to_list()
+
+        for cat in unique_cats:
+            expr = (
+                pl.col(col)
+                .list.contains(cat)
+                .fill_null(False)
+                .cast(pl.Int8)
+                .alias(f"{col}_{clean_string(cat)}")
+            )
+            binary_exprs.append(expr)
+
+    if binary_exprs:
+        submissions = submissions.with_columns(binary_exprs)
+
+    return submissions.drop(list_cols).select(pl.exclude("instanceid"), pl.col("instanceid"))
 
 
-def fetch_form_choices(iaso: IASO, form_id: int) -> pl.DataFrame:
-    """Retrieves form metadata from IASO API.
+def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
+    """Validate the schema of the submissions DataFrame against the database table.
 
     Args:
-        iaso (IASO): Authenticated IASO object.
-        form_id (int): Form ID to retrieve metadata.
-
+        submissions: The submissions DataFrame to validate.
+        table_name: Name of the database table to validate against.
+    
     Returns:
-        pl.DataFrame: Form metadata DataFrame.
+        bool: True if schema is valid
     """
-    try:
-        res = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": "latest_form_version"})
-        xls_url = res.json().get("latest_form_version", {}).get("xls_file", "")
-
-        if not xls_url:
-            return pl.DataFrame()
-
-        return pl.from_pandas(
-            pd.read_excel(xls_url, sheet_name="choices")
-            .dropna(subset=["list_name", "label"])
-            .reset_index(drop=True)
+    db_table_columns = (
+        pl.read_database_uri(
+            query=(
+                f"select column_name from information_schema.columns "
+                f"where table_name='{table_name}'"
+            ),
+            uri=workspace.database_url,
         )
-    except Exception as e:
-        current_run.log_warning(f"Choice metadata incomplete: {e}")
-        return pl.DataFrame()
+        .select("column_name")
+        .to_series()
+        .to_list()
+    )
+    if (
+        db_table_columns
+        and set(submissions.columns).issubset(set(db_table_columns))
+        and len(submissions.columns) > len(db_table_columns)
+    ):
+        msg = (
+            f"Schema mismatch: New columns {set(submissions.columns) - set(db_table_columns)} "
+            "not present in existing table"
+        )
+        current_run.log_critical(msg)
+        return False
+    return True
+
+
+def _prepare_output_path(form_name: str) -> Path:
+    """Create output directory structure and return full path."""  # noqa: DOC201
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
+    output_dir.mkdir(exist_ok=True, parents=True)
+    return output_dir / f"submissions_{form_name}_{timestamp}.csv"
+
+
+def _clean_temp_files(output_path: Path) -> None:
+    """Clean up temporary output files."""
+    try:
+        if output_path.exists():
+            output_path.unlink()
+        output_path.rmdir()
+        Path(workspace.files_path, "iaso-pipelines").rmdir()
+    except OSError as err:
+        current_run.log_warning(f"Temp file cleanup failed: {err}")
+
+
+def clean_string(input_str: str) -> str:
+    """Normalize and sanitize string for safe file/table names.
+
+    Args:
+        input_str: Original input string
+
+    Returns:
+        Normalized string with special characters removed
+    """
+    normalized = unicodedata.normalize("NFD", input_str)
+    cleaned = "".join(c for c in normalized if not unicodedata.combining(c))
+    sanitized = CLEAN_PATTERN.sub("", cleaned)
+    return sanitized.strip().replace(" ", "_").lower()
 
 
 if __name__ == "__main__":
