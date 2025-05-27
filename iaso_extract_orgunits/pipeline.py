@@ -296,7 +296,7 @@ def export_to_file(
             org_units_df.write_csv(output_file_path)
 
         elif output_format == ".parquet":
-            org_units_df.write_parquet(output_file_path, index=False)
+            org_units_df.write_parquet(output_file_path)
 
         elif output_format == ".xlsx":
             with pd.ExcelWriter(output_file_path) as writer:
