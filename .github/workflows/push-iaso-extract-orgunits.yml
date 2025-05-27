@@ -1,0 +1,37 @@
+name: Push extract-orgunits pipeline to OpenHEXA Workspace
+
+on:
+  push:
+    paths:
+      - ".github/workflows/push-iaso-extract-orgunits.yml"
+      - "iaso_extract_orgunits/**"
+      - "!iaso_extract_orgunits/docs/**"
+      - "!iaso_extract_orgunits/docs/README.md"
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.11'
+      
+      - name: Configure OpenHEXA CLI
+        uses: blsq/openhexa-cli-action@v1
+        with:
+          workspace:  "ds-templates"
+          token: ${{ secrets.OH_TOKEN }}
+          
+      - name: Push pipeline to OpenHEXA
+        run: |
+          openhexa pipelines push iaso_extract_orgunits \
+            --code "iaso-extract-orgunits" \
+            --description "${{ github.event.head_commit.message }}" \
+            --link "https://github.com/BLSQ/openhexa-templates-ds/commit/${{ github.sha }}" \
+            --yes
