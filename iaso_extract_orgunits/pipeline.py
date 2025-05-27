@@ -133,6 +133,8 @@ def iaso_extract_orgunits(
     if dataset:
         export_to_dataset(file_path=output_file_path, dataset=dataset)
 
+    current_run.log_info("Pipeline executed successfully ✅")
+
 
 # @iaso_extract_orgunits.task
 def authenticate_iaso(connection: IASOConnection) -> IASO:
@@ -284,7 +286,7 @@ def export_to_file(
         output_file_name=output_file_name,
     )
 
-    current_run.log_info(f"Writing data to: {output_file_path}")
+    current_run.log_info(f"Exporting to file: `{output_file_path}`")
 
     if output_format in {".gpkg", ".geojson", ".shp", ".topojson"}:
         geo_df = _prepare_geodataframe(org_units_df)
@@ -301,7 +303,6 @@ def export_to_file(
             with pd.ExcelWriter(output_file_path) as writer:
                 org_units_df.to_pandas().to_excel(writer, index=False)
 
-    current_run.log_info(f"Exporting to file: {output_file_path}")
     current_run.add_file_output(output_file_path.as_posix())
 
     return output_file_path
