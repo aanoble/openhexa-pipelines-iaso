@@ -84,7 +84,6 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     type=str,
     required=False,
     choices=["append", "replace"],
-    default="replace",
     help="Database write behavior for existing tables",
 )
 @parameter(
@@ -388,12 +387,33 @@ def _generate_output_file_path(
     """
     if output_file_name:
         output_file_path = Path(output_file_name)
+        
         if not output_file_path.suffix:
             output_file_path = output_file_path.with_suffix(output_format)
 
+        if output_file_path.suffix not in {
+            ".csv",
+            ".gpkg",
+            ".geojson",
+            ".parquet",
+            ".shp",
+            ".topojson",
+            ".xlsx",
+        }:
+            current_run.log_error(
+                f"Invalid output file format: {output_file_path.suffix}. "
+                f"Supported formats are: .csv, .gpkg, .geojson, .parquet, .shp, .topojson, .xlsx"
+            )
+            raise ValueError(
+                f"Invalid output file format: {output_file_path.suffix}. "
+                f"Supported formats are: .csv, .gpkg, .geojson, .parquet, .shp, .topojson, .xlsx"
+            )
+        
         if not output_file_path.is_absolute():
             output_file_path = Path(workspace.files_path) / output_file_path
+        
         output_file_path.parent.mkdir(parents=True, exist_ok=True)
+        
         return output_file_path
 
     output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-orgunits")
