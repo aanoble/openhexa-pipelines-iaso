@@ -304,14 +304,18 @@ def export_to_file(
 
                 elif isinstance(geo_df[col].iloc[0], (list, dict)):
                     geo_df[col] = geo_df[col].astype(str)
-        
+
         if output_format == ".topojson":
-            topo = tp.Topology(geo_df, prequantize=False, topology=True)
-            topo.to_json(output_file_path)
-            current_run.add_file_output(output_file_path.as_posix())
-            return output_file_path
-        
-        geo_df.to_file(output_file_path, driver=_get_driver(output_format), encoding="utf-8")
+            features = json.loads(
+                geo_df.to_json(na="null", date_format="iso")  # Handle NaT and dates
+            )
+            topo = tp.Topology(features, prequantize=False, topology=True)
+            
+            with Path(output_file_path).open("w", encoding="utf-8") as f:
+                json.dump(topo.to_dict(), f)
+
+        else:
+            geo_df.to_file(output_file_path, driver=_get_driver(output_format), encoding="utf-8")
 
     else:
         if output_format == ".csv":
@@ -321,8 +325,7 @@ def export_to_file(
             org_units_df.write_parquet(output_file_path)
 
         elif output_format == ".xlsx":
-            with pd.ExcelWriter(output_file_path) as writer:
-                org_units_df.to_pandas().to_excel(writer, index=False)
+            org_units_df.to_pandas().to_excel(output_file_path, index=False)
 
     current_run.add_file_output(output_file_path.as_posix())
 
