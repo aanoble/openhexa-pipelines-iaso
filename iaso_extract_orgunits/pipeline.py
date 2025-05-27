@@ -128,12 +128,10 @@ def iaso_extract_orgunits(
     )
 
     if db_table_name:
-        export_to_database(
-            org_units_df=org_units_df, db_table_name=db_table_name, save_mode=save_mode
-        )
+        export_to_database(org_units_df=org_units_df, table_name=db_table_name, save_mode=save_mode)
 
     if dataset:
-        export_to_dataset(output_file_path, dataset)
+        export_to_dataset(file_path=output_file_path, dataset=dataset)
 
 
 # @iaso_extract_orgunits.task
