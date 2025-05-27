@@ -196,7 +196,7 @@ def fetch_org_units(iaso_client: IASO, org_unit_id: int | None) -> pl.DataFrame:
         raise
 
 
-def get_organisation_units(iaso_client: IASO, ou_id: int | None) -> pl.DataFrame:
+def get_organisation_units(iaso_client: IASO, ou_id: int | None = None) -> pl.DataFrame:
     """Retrieve organizational units data from IASO.
 
     Args:
