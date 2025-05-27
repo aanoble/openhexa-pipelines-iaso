@@ -10,7 +10,6 @@ from io import StringIO
 from pathlib import Path
 
 import geopandas as gpd
-import pandas as pd
 import polars as pl
 import topojson as tp
 from openhexa.sdk import (
@@ -306,9 +305,12 @@ def export_to_file(
                     geo_df[col] = geo_df[col].astype(str)
 
         if output_format == ".topojson":
-            features = json.loads(
-                geo_df.to_json(na="null", date_format="iso")  # Handle NaT and dates
-            )
+            for col in geo_df.select_dtypes(
+                include=["datetime", "datetimetz", "object", "datetime64[ns]"]
+            ).columns:
+                geo_df[col] = geo_df[col].astype(str)
+
+            features = json.loads(geo_df.to_json(na="null"))
             topo = tp.Topology(features, prequantize=False, topology=True)
 
             with Path(output_file_path).open("w", encoding="utf-8") as f:
