@@ -393,11 +393,11 @@ def _generate_output_file_path(
 
         if not output_file_path.is_absolute():
             output_file_path = Path(workspace.files_path) / output_file_path
-        output_file_path.mkdir(exist_ok=True, parents=True)
+        output_file_path.parent.mkdir(parents=True, exist_ok=True)
         return output_file_path
 
     output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-orgunits")
-    output_dir.mkdir(exist_ok=True, parents=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     base_name = (
         "orgunits"
