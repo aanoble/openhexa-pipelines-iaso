@@ -385,7 +385,21 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         file_name = match.group(1) if match else clean_string(stem)
 
         version = _get_or_create_dataset_version(dataset, file_name)
-        version.add_file(file_path, file_path.name)
+        try:
+            version.add_file(file_path, file_path.name)
+        except ValueError as err:
+            if err.args and "already exists" in err.args[0]:
+                msg_critical = (
+                    f"File `{file_path.name}` already exists in dataset version `{version.name}`. "
+                )
+                current_run.log_critical(msg_critical)
+
+                file_name = file_path.with_name(
+                    f"{file_path.name}_{datetime.now().strftime('%Y-%m-%d_%H:%M')}{file_path.suffix}"
+                ).name
+                current_run.log_info(f"Renaming file to `{file_name}` to avoid conflict")
+
+                version.add_file(file_path, file_name)
 
         current_run.log_info(
             f"File {file_path.name} added to dataset `{dataset.name}` in `{version.name}` version"
