@@ -1,3 +1,4 @@
 psycopg2-binary
 geoalchemy2
+topojson
 openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
