@@ -25,7 +25,7 @@ jobs:
       - name: Configure OpenHEXA CLI
         uses: blsq/openhexa-cli-action@v1
         with:
-          workspace:  "ds-templates"
+          workspace:  "civ-pnlp-f01048"
           token: ${{ secrets.OH_TOKEN }}
           
       - name: Push pipeline to OpenHEXA
@@ -33,5 +33,5 @@ jobs:
           openhexa pipelines push iaso_extract_orgunits \
             --code "iaso-extract-orgunits" \
             --description "${{ github.event.head_commit.message }}" \
-            --link "https://github.com/BLSQ/openhexa-templates-ds/commit/${{ github.sha }}" \
+            --link "https://github.com/aanoble/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
             --yes
