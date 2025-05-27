@@ -75,10 +75,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     name="Database table name",
     type=str,
     required=False,
-    help=(
-        "Target table name for organization units storage"
-        "(default if ou_id is define: ou_<ou_type_name>, else <orgunits>)"
-    ),
+    help="Target table name for organization units storage",
 )
 @parameter(
     "save_mode",
