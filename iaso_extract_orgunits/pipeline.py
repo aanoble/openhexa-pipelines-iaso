@@ -310,7 +310,7 @@ def export_to_file(
                 geo_df.to_json(na="null", date_format="iso")  # Handle NaT and dates
             )
             topo = tp.Topology(features, prequantize=False, topology=True)
-            
+
             with Path(output_file_path).open("w", encoding="utf-8") as f:
                 json.dump(topo.to_dict(), f)
 
