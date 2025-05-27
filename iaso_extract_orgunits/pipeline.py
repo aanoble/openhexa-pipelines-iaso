@@ -357,7 +357,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         file_name = match.group(1) if match else clean_string(stem)
 
         version = _get_or_create_dataset_version(dataset, file_name)
-        version.add_file(file_path, file_name)
+        version.add_file(file_path, file_path.name)
 
         current_run.log_info(
             f"File {file_path.name} added to dataset `{dataset.name}` in `{version.name}` version"
@@ -387,7 +387,7 @@ def _generate_output_file_path(
     """
     if output_file_name:
         output_file_path = Path(output_file_name)
-        
+
         if not output_file_path.suffix:
             output_file_path = output_file_path.with_suffix(output_format)
 
@@ -408,12 +408,12 @@ def _generate_output_file_path(
                 f"Invalid output file format: {output_file_path.suffix}. "
                 f"Supported formats are: .csv, .gpkg, .geojson, .parquet, .shp, .topojson, .xlsx"
             )
-        
+
         if not output_file_path.is_absolute():
             output_file_path = Path(workspace.files_path) / output_file_path
-        
+
         output_file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         return output_file_path
 
     output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-orgunits")
