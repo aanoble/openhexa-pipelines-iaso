@@ -280,7 +280,10 @@ def export_to_file(
         Path: The path to the exported file.
     """
     output_file_path = _generate_output_file_path(
-        org_units_df, ou_id, output_file_name, output_format
+        output_format=output_format,
+        org_units_df=org_units_df,
+        org_unit_id=ou_id,
+        output_file_name=output_file_name,
     )
 
     current_run.log_info(f"Writing data to: {output_file_path}")
