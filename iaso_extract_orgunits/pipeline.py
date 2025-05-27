@@ -84,6 +84,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     type=str,
     required=False,
     choices=["append", "replace"],
+    default=None,
     help="Database write behavior for existing tables",
 )
 @parameter(
