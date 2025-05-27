@@ -125,6 +125,7 @@ def iaso_extract_orgunits(
         output_file_name=output_file_name,
         output_format=output_format,
     )
+    current_run.log_info(f"Data exported to file: `{output_file_path}`")
 
     if db_table_name:
         export_to_database(org_units_df=org_units_df, table_name=db_table_name, save_mode=save_mode)
@@ -289,6 +290,20 @@ def export_to_file(
 
     if output_format in {".gpkg", ".geojson", ".shp", ".topojson"}:
         geo_df = _prepare_geodataframe(org_units_df)
+
+        if output_format == ".shp":
+            for col in geo_df.select_dtypes(
+                include=["datetime", "datetimetz", "object", "datetime64[ns]"]
+            ).columns:
+                geo_df[col] = geo_df[col].astype(str)
+
+            for col in geo_df.columns:
+                if geo_df[col].dtype == "bool":
+                    geo_df[col] = geo_df[col].astype(int)
+
+                elif isinstance(geo_df[col].iloc[0], (list, dict)):
+                    geo_df[col] = geo_df[col].astype(str)
+
         geo_df.to_file(output_file_path, driver=_get_driver(output_format), encoding="utf-8")
 
     else:
