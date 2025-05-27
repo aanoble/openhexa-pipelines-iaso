@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 from datetime import datetime
+from io import StringIO
 from pathlib import Path
 
 import geopandas as gpd
@@ -184,11 +185,77 @@ def fetch_org_units(iaso_client: IASO, org_unit_id: int | None) -> pl.DataFrame:
                 raise ValueError(f"No organization type found for ID {org_unit_id}")
 
             org_type_name = org_type_df["name"][0]
-            return dataframe.get_organisation_units(iaso_client).filter(
+            return get_organisation_units(iaso_client=iaso_client, ou_id=org_unit_id).filter(
                 pl.col("org_unit_type") == org_type_name
             )
 
-        return dataframe.get_organisation_units(iaso_client)
+        return get_organisation_units(iaso_client)
+
+    except Exception as err:
+        current_run.log_error(f"Failed to fetch OrgUnit from IASO API: {err}")
+        raise
+
+
+def get_organisation_units(iaso_client: IASO, ou_id: int | None) -> pl.DataFrame:
+    """Retrieve organizational units data from IASO.
+
+    Args:
+        iaso_client: Authenticated IASO client
+        ou_id: Optional specific organization unit ID
+
+    Returns:
+        DataFrame containing organizational units data
+
+    Raises:
+        ValueError: If specified org unit ID is not found
+    """
+    try:
+        if ou_id:
+            response = iaso_client.api_client.get(
+                url="api/orgunits", params={"csv": True, "orgUnitTypeId": ou_id}, stream=True
+            )
+            response.raise_for_status()
+
+            df_ou = pl.read_csv(StringIO(response.content.decode("utf8")))
+
+        else:
+            response = iaso_client.api_client.get(
+                "/api/orgunits", params={"csv": True}, stream=True
+            )
+            response.raise_for_status()
+
+            df_ou = pl.read_csv(StringIO(response.content.decode("utf8")))
+
+        df_ou = df_ou.select(
+            pl.col("ID").alias("id"),
+            pl.col("Nom").alias("name"),
+            pl.col("Type").alias("org_unit_type"),
+            pl.col("Latitude").alias("latitude"),
+            pl.col("Longitude").alias("longitude"),
+            pl.col("Date d'ouverture").str.to_date("%Y-%m-%d").alias("opening_date"),
+            pl.col("Date de fermeture").str.to_date("%Y-%m-%d").alias("closing_date"),
+            pl.col("Date de création").str.to_datetime("%Y-%m-%d %H:%M").alias("created_at"),
+            pl.col("Date de modification").str.to_datetime("%Y-%m-%d %H:%M").alias("updated_at"),
+            pl.col("Source").alias("source"),
+            pl.col("Validé").alias("validation_status"),
+            pl.col("Référence externe").alias("source_ref"),
+            *[
+                pl.col(f"Ref Ext parent {lvl}").alias(f"level_{lvl}_ref")
+                for lvl in range(1, 10)
+                if f"Ref Ext parent {lvl}" in df_ou.columns
+            ],
+            *[
+                pl.col(f"parent {lvl}").alias(f"level_{lvl}_name")
+                for lvl in range(1, 10)
+                if f"parent {lvl}" in df_ou.columns
+            ],
+        )
+        geoms = dataframe._get_org_units_geometries(iaso_client)
+        return df_ou.with_columns(
+            pl.col("id")
+            .map_elements(lambda x: geoms.get(x, None), return_dtype=pl.String)
+            .alias("geometry")
+        )
 
     except Exception as err:
         current_run.log_error(f"Failed to fetch OrgUnit from IASO API: {err}")
