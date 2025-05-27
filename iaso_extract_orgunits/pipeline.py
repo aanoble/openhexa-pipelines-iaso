@@ -12,6 +12,7 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import polars as pl
+import topojson as tp
 from openhexa.sdk import (
     Dataset,
     IASOConnection,
@@ -303,7 +304,13 @@ def export_to_file(
 
                 elif isinstance(geo_df[col].iloc[0], (list, dict)):
                     geo_df[col] = geo_df[col].astype(str)
-
+        
+        if output_format == ".topojson":
+            topo = tp.Topology(geo_df, prequantize=False, topology=True)
+            topo.to_json(output_file_path)
+            current_run.add_file_output(output_file_path.as_posix())
+            return output_file_path
+        
         geo_df.to_file(output_file_path, driver=_get_driver(output_format), encoding="utf-8")
 
     else:
