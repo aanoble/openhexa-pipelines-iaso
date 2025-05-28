@@ -226,9 +226,9 @@ def process_choices(
         return submissions
 
     try:
-        questions, choices = dataframe.get_form_metadata(iaso_client, form_id)
+        form_metadata = dataframe.get_form_metadata(iaso_client, form_id)
         return dataframe.replace_labels(
-            submissions=submissions, questions=questions, choices=choices, language="French"
+            submissions=submissions, form_metadata=form_metadata, language="French"
         )
     except Exception as exc:
         current_run.log_error(f"Choice conversion failed: {exc}")
