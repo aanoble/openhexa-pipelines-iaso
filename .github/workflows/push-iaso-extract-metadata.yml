@@ -31,5 +31,7 @@ jobs:
       - name: Push pipeline to OpenHEXA
         run: |
           openhexa pipelines push iaso_extract_metadata \
+            --code "iaso-extract-metadata" \
             --description "${{ github.event.head_commit.message }}" \
-            --link "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}"
+            --link "https://github.com/BLSQ/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
+            --yes

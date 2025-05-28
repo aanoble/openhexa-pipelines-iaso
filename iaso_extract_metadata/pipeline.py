@@ -22,19 +22,41 @@ from openhexa.toolbox.iaso import IASO, dataframe
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
 @parameter("form_id", name="Form ID", type=int, required=True)
 @parameter(
+    code="output_file_name",
+    type=str,
+    name="Path and base name of the output file (without extension)",
+    help=(
+        "Path and base name of the output file (without extension) in the workspace files directory"
+        "(default if ou_id is defined: "
+        "`iaso-pipelines/extract-metadata/md_<form_name>.<output_format>`"
+    ),
+    required=False,
+)
+@parameter(
+    code="output_format",
+    type=str,
+    name="File format to use for exporting the data",
+    required=False,
+    default=".parquet",
+    choices=[
+        ".csv",
+        ".parquet",
+        ".xlsx",
+    ],
+)
+@parameter(
     "db_table_name",
     name="Database table name",
     type=str,
     required=False,
-    help="Target database table name for metadata (default: md_<form_name>)",
+    help="Target database table name for metadata",
 )
 @parameter(
     "save_mode",
     name="Saving mode",
     type=str,
-    required=True,
+    required=False,
     choices=["append", "replace"],
-    default="replace",
     help="Select mode if table exists",
 )
 @parameter(
@@ -42,11 +64,13 @@ from openhexa.toolbox.iaso import IASO, dataframe
     name="Output dataset",
     type=Dataset,
     required=False,
-    help="Dataset to store metadata",
+    help="Dataset to store metadata file",
 )
 def iaso_extract_metadata(
     iaso_connection: IASOConnection,
     form_id: int,
+    output_file_name: str,
+    output_format: str,
     db_table_name: str,
     save_mode: str,
     dataset: Dataset,
@@ -61,11 +85,19 @@ def iaso_extract_metadata(
 
     questions, choices = fetch_form_metadata(iaso, form_id)
 
-    table_name = db_table_name or f"md_{form_name}"
-    export_to_database(questions, choices, table_name, save_mode)
+    output_file_path = export_to_file(
+        questions,
+        choices,
+        form_name,
+        output_file_name,
+        output_format,
+    )
+
+    if db_table_name:
+        export_to_database(questions, choices, db_table_name, save_mode)
 
     if dataset:
-        export_to_dataset(questions, choices, dataset, form_name)
+        export_to_dataset(output_file_path, dataset)
 
     current_run.log_info("Pipeline execution successful ✅")
 
@@ -119,7 +151,19 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
     Returns:
         pl.DataFrame: Metadata for the form.
     """
-    questions, choices = dataframe.get_form_metadata(iaso, form_id)
+    form_metadata = dataframe.get_form_metadata(iaso, form_id)
+
+    valid_versions = {k: v for k, v in form_metadata.items() if isinstance(k, int)}
+    if valid_versions:
+        latest_dt = max(valid_versions)
+        latest_version = valid_versions[latest_dt]
+
+    else:
+        latest_dt = next(iter(form_metadata))
+        latest_version = form_metadata[latest_dt]
+
+    questions = latest_version.get("questions", {})
+    choices = latest_version.get("choices", {})
 
     questions = pl.DataFrame(
         {
@@ -142,6 +186,43 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
     return questions, choices
 
 
+def export_to_file(
+    questions: pl.DataFrame,
+    choices: pl.DataFrame,
+    form_name: str,
+    output_file_name: str,
+    output_format: str,
+) -> Path:
+    """Export metadata to a file in the specified format.
+
+    Args:
+        questions (pl.DataFrame): Metadata questions to export.
+        choices (pl.DataFrame): Metadata choices to export.
+        form_name (str): Name of the form.
+        output_file_name (str): Base name of the output file.
+        output_format (str): File format to use for exporting the data.
+
+    Returns:
+       Path: Path to the exported file.
+    """
+    output_file_path = _generate_output_file_path(
+        form_name=form_name, output_file_name=output_file_name, output_format=output_format
+    )
+
+    current_run.log_info(f"Exporting form metadata to file `{output_file_path}`")
+    if output_format == ".xlsx":
+        with xlsxwriter.Workbook(output_file_path) as workbook:
+            questions.write_excel(workbook, workbook.add_worksheet("Questions"))
+            choices.write_excel(workbook, workbook.add_worksheet("Choices"))
+
+    if output_format in {".csv", ".parquet"}:
+        questions.join(choices, on="name", how="left").sort("label").write_csv(output_file_path)
+
+    current_run.add_file_output(output_file_path.as_posix())
+    current_run.log_info(f"Metadata saved to file `{output_file_path}`")
+    return output_file_path
+
+
 def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_name: str, mode: str):
     """Export metadata to a database table.
 
@@ -154,6 +235,7 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
     current_run.log_info("Exporting form metadata to database")
     try:
         metadata = questions.join(choices, on="name", how="left").sort("label")
+        mode = mode or "replace"
 
         metadata.write_database(
             table_name=table_name,
@@ -167,48 +249,45 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
         raise
 
 
-def export_to_dataset(
-    questions: pl.DataFrame, choices: pl.DataFrame, dataset: Dataset, form_name: str
-):
+def export_to_dataset(file_path: Path, dataset: Dataset):
     """Export metadata to a dataset.
 
     Args:
-        questions (pl.DataFrame): Metadata questions to export.
-        choices (pl.DataFrame): Metadata choices to export.
+        file_path (Path): Path to the output file.
         dataset (Dataset): Dataset to export to.
-        form_name (str): Name of the form.
+
+    Raises:
+        RuntimeError: If dataset export fails
     """
-    current_run.log_info(f"Exporting form metadata to dataset {dataset.name}")
-    timestamp = datetime.now().strftime("%Y%m%d_%H:%M")
-    output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-metadata")
-    output_dir.mkdir(exist_ok=True, parents=True)
-
     try:
-        # Write metadata to csv
-        file_path = output_dir / f"md_{form_name}_{timestamp}.xlsx"
-        with xlsxwriter.Workbook(file_path) as workbook:
-            questions.write_excel(workbook, workbook.add_worksheet("Questions"))
-            choices.write_excel(workbook, workbook.add_worksheet("Choices"))
+        stem = Path(file_path).stem
+        match = re.match(r"^(.*)_\d{4}-\d{2}-\d{2}_\d{2}:\d{2}$", stem)
+        file_name = match.group(1) if match else clean_string(stem)
 
-        # create/retreieve dataset version
-        version_name = f"md_{form_name}"
-        version = next((v for v in dataset.versions if v.name == version_name), None)
-        version = version or dataset.create_version(version_name)
+        version = next((v for v in dataset.versions if v.name == file_name), None)
+        version = version or dataset.create_version(file_name)
 
-        # add file to dataset version
-        version.add_file(file_path)
+        try:
+            version.add_file(file_path, file_path.name)
+        except ValueError as err:
+            if err.args and "already exists" in err.args[0]:
+                msg_critical = (
+                    f"File `{file_path.name}` already exists in dataset version `{version.name}`. "
+                )
+                current_run.log_critical(msg_critical)
+
+                file_name = file_path.with_name(
+                    f"{file_path.name}_{datetime.now().strftime('%Y-%m-%d_%H:%M')}{file_path.suffix}"
+                ).name
+
+                current_run.log_info(f"Renaming file to `{file_name}` to avoid conflict")
+
+                version.add_file(file_path, file_name)
 
         current_run.log_info(f"Metadata saved to dataset {dataset.name} in {version.name} version")
     except Exception as e:
         current_run.log_error(f"Dataset export failed: {e}")
         raise
-    finally:
-        # Clean tempory files
-        if file_path.exists():
-            file_path.unlink()
-
-        output_dir.rmdir()
-        Path(workspace.files_path, "iaso-pipelines").rmdir()
 
 
 def clean_string(data: str) -> str:
@@ -224,6 +303,46 @@ def clean_string(data: str) -> str:
     data = "".join(c for c in data if not unicodedata.combining(c))
     # Precompile regex patterns for performance
     return re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
+
+
+def _generate_output_file_path(form_name: str, output_file_name: str, output_format: str) -> Path:
+    """Generate the output file path based on provided parameters.
+
+    Args:
+        form_name: Name of the form to include in the file name.
+        output_file_name: Optional custom output file name.
+        output_format: File format extension for the output file.
+
+    Returns:
+        Path to the output file.
+    """
+    if output_file_name:
+        output_file_path = Path(output_file_name)
+
+        if not output_file_path.suffix:
+            output_file_path = output_file_path.with_suffix(output_format)
+
+        if output_file_path.suffix not in [".csv", ".parquet", ".xlsx"]:
+            current_run.log_error(
+                f"Unsupported output format: {output_file_path.suffix}. "
+                "Supported formats are: .csv, .parquet, .xlsx"
+            )
+            raise ValueError(f"Unsupported output format: {output_file_path.suffix}")
+
+        if not output_file_path.is_absolute():
+            output_file_path = Path(workspace.files_path, output_file_path)
+
+        output_file_path.parent.mkdir(parents=True, exist_ok=True)
+        return output_file_path
+
+    output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-metadata")
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    base_name = f"md_{clean_string(form_name)}"
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M")
+    file_name = f"{base_name}_{timestamp}{output_format}"
+
+    return output_dir / file_name
 
 
 if __name__ == "__main__":
