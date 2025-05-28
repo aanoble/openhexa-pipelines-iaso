@@ -47,7 +47,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     help=(
         "Path and base name of the output file (without extension) in the workspace files directory"
         "(default if ou_id is defined: "
-        "`iaso-pipelines/extract-submissions/form_<form_name>.<output_format>`"
+        "`iaso-pipelines/extract-submissions/<form_name>.<output_format>`"
     ),
     required=False,
 )
@@ -83,7 +83,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     name="Output Dataset",
     type=Dataset,
     required=False,
-    help="Target OpenHEXA dataset for storing submissions",
+    help="Target OpenHEXA dataset for storing submissions file",
 )
 def iaso_extract_submissions(
     iaso_connection: IASOConnection,
@@ -109,6 +109,7 @@ def iaso_extract_submissions(
         submissions = deduplicate_columns(submissions)
 
         output_file_path = export_to_file(submissions, form_name, output_file_name, output_format)
+        current_run.log_info(f"Data exported to file: `{output_file_path}`")
 
         if db_table_name:
             export_to_database(submissions, db_table_name, save_mode)
@@ -279,7 +280,7 @@ def export_to_file(
         form_name=form_name, output_file_name=output_file_name, output_format=output_format
     )
 
-    current_run.log_info(f"Exporting submissions to `{output_file_path}`")
+    current_run.log_info(f"Exporting submissions fiile to: `{output_file_path}`")
     if output_format == ".csv":
         submissions.write_csv(output_file_path)
     elif output_format == ".parquet":
@@ -300,6 +301,7 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
         mode: Mode to use when saving the table (replace or append).
     """
     if _validate_schema(submissions, table_name):
+        mode = mode or "replace"
         submissions.write_database(
             table_name=table_name,
             connection=workspace.database_url,
@@ -452,8 +454,8 @@ def _generate_output_file_path(form_name: str, output_file_name: str, output_for
     output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    base_name = f"form_{clean_string(form_name)}"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    base_name = f"{clean_string(form_name)}"
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M")
     file_name = f"{base_name}_{timestamp}{output_format}"
 
     return output_dir / file_name

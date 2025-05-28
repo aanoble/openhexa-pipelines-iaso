@@ -83,7 +83,6 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     type=str,
     required=False,
     choices=["append", "replace"],
-    default=None,
     help="Database write behavior for existing tables",
 )
 @parameter(
@@ -91,7 +90,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     name="Output Dataset",
     required=False,
     type=Dataset,
-    help="Target dataset for geopackage export",
+    help="Target dataset for orgunits data file export",
 )
 def iaso_extract_orgunits(
     iaso_connection: IASOConnection,
@@ -357,6 +356,7 @@ def export_to_database(
         geo_df = _prepare_geodataframe(org_units_df)
 
         engine = create_engine(workspace.database_url)
+        save_mode = save_mode or "replace"
         geo_df.to_postgis(table_name, engine, if_exists=save_mode, index=False)
 
         current_run.add_database_output(table_name)
