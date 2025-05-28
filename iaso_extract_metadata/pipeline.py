@@ -53,7 +53,7 @@ def iaso_extract_metadata(
 ):
     """Main pipeline to extract IASO form metadata.
 
-    Pipeline functions should only call tasks and should never perform 
+    Pipeline functions should only call tasks and should never perform
     IO operations or expensive computations.
     """
     iaso = authenticate_iaso(iaso_connection)
@@ -153,7 +153,7 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
     """
     current_run.log_info("Exporting form metadata to database")
     try:
-        metadata = questions.join(choices, on="name").sort("label")
+        metadata = questions.join(choices, on="name", how="left").sort("label")
 
         metadata.write_database(
             table_name=table_name,

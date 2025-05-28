@@ -50,8 +50,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     help=(
         "Path and base name of the output file (without extension) in the workspace files directory"
         "(default if ou_id is defined: "
-        "`iaso-pipelines/extract-orgunits/ou_<ou_type_name>.<output_format>`, "
-        # "else `iaso-pipelines/extract-orgunits/<orgunits>`)"
+        "`iaso-pipelines/extract-orgunits/ou_<ou_type_name>.<output_format>`"
     ),
     required=False,
 )
@@ -385,6 +384,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         file_name = match.group(1) if match else clean_string(stem)
 
         version = _get_or_create_dataset_version(dataset, file_name)
+
         try:
             version.add_file(file_path, file_path.name)
         except ValueError as err:

@@ -26,7 +26,7 @@ jobs:
         uses: blsq/openhexa-cli-action@v1
         with:
           workspace: "civ-pnlp-f01048"
-          token: ${{ secrets.OH_TOKEN_CIV_PNLP }}
+          token: ${{ secrets.OH_TOKEN }}
           
       - name: Push pipeline to OpenHEXA
         run: |

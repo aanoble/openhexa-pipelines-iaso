@@ -41,19 +41,41 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     help="Replace choice codes with labels",
 )
 @parameter(
+    code="output_file_name",
+    type=str,
+    name="Path and base name of the output file (without extension)",
+    help=(
+        "Path and base name of the output file (without extension) in the workspace files directory"
+        "(default if ou_id is defined: "
+        "`iaso-pipelines/extract-submissions/form_<form_name>.<output_format>`"
+    ),
+    required=False,
+)
+@parameter(
+    code="output_format",
+    type=str,
+    name="File format to use for exporting the data",
+    required=False,
+    default=".parquet",
+    choices=[
+        ".csv",
+        ".parquet",
+        ".xlsx",
+    ],
+)
+@parameter(
     "db_table_name",
     name="Database table name",
     type=str,
     required=False,
-    help="Target database table name (default: form_<form_name>)",
+    help="Target database table name",
 )
 @parameter(
     "save_mode",
     name="Save Mode",
     type=str,
-    required=True,
+    required=False,
     choices=["append", "replace"],
-    default="replace",
     help="Database write behavior for existing tables",
 )
 @parameter(
@@ -61,13 +83,15 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     name="Output Dataset",
     type=Dataset,
     required=False,
-    help="Target dataset for CSV output storage",
+    help="Target OpenHEXA dataset for storing submissions",
 )
 def iaso_extract_submissions(
     iaso_connection: IASOConnection,
     form_id: int,
     last_updated: str | None,
     choices_to_labels: bool | None,
+    output_file_name: str | None,
+    output_format: str | None,
     db_table_name: str | None,
     save_mode: str,
     dataset: Dataset | None,
@@ -84,11 +108,13 @@ def iaso_extract_submissions(
         submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
         submissions = deduplicate_columns(submissions)
 
-        table_name = db_table_name or f"form_{form_name}"
-        export_to_database(submissions, table_name, save_mode)
+        output_file_path = export_to_file(submissions, form_name, output_file_name, output_format)
+
+        if db_table_name:
+            export_to_database(submissions, db_table_name, save_mode)
 
         if dataset:
-            export_to_dataset(dataset, submissions, form_name)
+            export_to_dataset(dataset, output_file_path)
 
         current_run.log_info("Pipeline execution successful ✅")
 
@@ -231,7 +257,38 @@ def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
             duplicates_columns[col].remove(duplicates_columns[col][0])
 
     submissions.columns = cleaned_columns
-    return submissions
+    return _process_submissions(submissions)
+
+
+def export_to_file(
+    submissions: pl.DataFrame, form_name: str, output_file_name: str, output_format: str
+) -> Path:
+    """Export submissions data to specified file format.
+
+    Args:
+        submissions: DataFrame containing the form submissions.
+        form_name: Name of the form to use in the output file name.
+        output_file_name: Optional custom output file name. If not provided, defaults to
+            `iaso-pipelines/extract-submissions/form_<form_name>.<output_format>`.
+        output_format: File format extension for the output file.
+
+    Returns:
+        Path: The path to the exported file.
+    """
+    output_file_path = _generate_output_file_path(
+        form_name=form_name, output_file_name=output_file_name, output_format=output_format
+    )
+
+    current_run.log_info(f"Exporting submissions to `{output_file_path}`")
+    if output_format == ".csv":
+        submissions.write_csv(output_file_path)
+    elif output_format == ".parquet":
+        submissions.write_parquet(output_file_path)
+    else:
+        submissions.to_pandas().to_excel(output_file_path, index=False)
+
+    current_run.add_file_output(output_file_path.as_posix())
+    return output_file_path
 
 
 def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) -> None:
@@ -242,7 +299,6 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
         table_name: Name of the database table where submissions will be saved.
         mode: Mode to use when saving the table (replace or append).
     """
-    submissions = _process_submissions(submissions)
     if _validate_schema(submissions, table_name):
         submissions.write_database(
             table_name=table_name,
@@ -251,32 +307,52 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
         )
         current_run.add_database_output(table_name)
         current_run.log_info(
-            f"Form submissions saved to database {len(submissions)} rows into {table_name}"
+            f"Form submissions saved to database {len(submissions)} rows into `{table_name}`"
         )
 
 
-def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: str):
+def export_to_dataset(dataset: Dataset, file_path: Path):
     """Saves form submissions to the specified dataset.
 
     Args:
         dataset (Dataset): The dataset where the submissions will be stored.
-        submissions (pl.DataFrame): DataFrame containing the submissions.
-        form_name (str): Name of the form.
-    """
-    current_run.log_info(f"Export form submissions to dataset {dataset.name}")
+        file_path (Path): The path to the file containing the submissions data.
 
+    Raises:
+        RuntimeError: If dataset export fails
+    """
     try:
-        output_path = _prepare_output_path(form_name)
-        version_name = f"form_{form_name}"
-        version = next((v for v in dataset.versions if v.name == version_name), None)
-        version = version or dataset.create_version(version_name)
-        version.add_file(output_path)
+        stem = Path(file_path).stem
+        match = re.match(r"^(.*)_\d{4}-\d{2}-\d{2}_\d{2}:\d{2}$", stem)
+        file_name = match.group(1) if match else clean_string(stem)
+
+        version = next((v for v in dataset.versions if v.name == file_name), None)
+        version = version or dataset.create_version(file_name)
+
+        try:
+            version.add_file(file_path, file_path.name)
+        except ValueError as err:
+            if err.args and "already exists" in err.args[0]:
+                msg_critical = (
+                    f"File `{file_path.name}` already exists in dataset version `{version.name}`. "
+                )
+                current_run.log_critical(msg_critical)
+
+                file_name = file_path.with_name(
+                    f"{file_path.name}_{datetime.now().strftime('%Y-%m-%d_%H:%M')}{file_path.suffix}"
+                ).name
+
+                current_run.log_info(f"Renaming file to `{file_name}` to avoid conflict")
+
+                version.add_file(file_path, file_name)
+
         current_run.log_info(
-            f"Form submissions successfully saved to {dataset.name} dataset "
-            f"in {version.name} version"
+            f"Form submissions successfully add to {dataset.name} dataset "
+            f"in `{version.name}` version"
         )
-    finally:
-        _clean_temp_files(output_path)
+    except Exception as err:
+        current_run.log_error(f"Dataset export failed: {err}")
+        raise RuntimeError("Dataset export operation failed") from err
 
 
 def _process_submissions(submissions: pl.DataFrame) -> pl.DataFrame:
@@ -313,7 +389,7 @@ def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
     Args:
         submissions: The submissions DataFrame to validate.
         table_name: Name of the database table to validate against.
-    
+
     Returns:
         bool: True if schema is valid
     """
@@ -343,23 +419,44 @@ def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
     return True
 
 
-def _prepare_output_path(form_name: str) -> Path:
-    """Create output directory structure and return full path."""  # noqa: DOC201
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+def _generate_output_file_path(form_name: str, output_file_name: str, output_format: str) -> Path:
+    """Generate the output file path based on provided parameters.
+
+    Args:
+        form_name: Name of the form to include in the file name.
+        output_file_name: Optional custom output file name.
+        output_format: File format extension for the output file.
+
+    Returns:
+        Path to the output file.
+    """
+    if output_file_name:
+        output_file_path = Path(output_file_name)
+
+        if not output_file_path.suffix:
+            output_file_path = output_file_path.with_suffix(output_format)
+
+        if output_file_path.suffix not in [".csv", ".parquet", ".xlsx"]:
+            current_run.log_error(
+                f"Unsupported output format: {output_file_path.suffix}. "
+                "Supported formats are: .csv, .parquet, .xlsx"
+            )
+            raise ValueError(f"Unsupported output format: {output_file_path.suffix}")
+
+        if not output_file_path.is_absolute():
+            output_file_path = Path(workspace.files_path, output_file_path)
+
+        output_file_path.parent.mkdir(parents=True, exist_ok=True)
+        return output_file_path
+
     output_dir = Path(workspace.files_path, "iaso-pipelines", "extract-submissions")
     output_dir.mkdir(exist_ok=True, parents=True)
-    return output_dir / f"submissions_{form_name}_{timestamp}.csv"
 
+    base_name = f"form_{clean_string(form_name)}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    file_name = f"{base_name}_{timestamp}{output_format}"
 
-def _clean_temp_files(output_path: Path) -> None:
-    """Clean up temporary output files."""
-    try:
-        if output_path.exists():
-            output_path.unlink()
-        output_path.rmdir()
-        Path(workspace.files_path, "iaso-pipelines").rmdir()
-    except OSError as err:
-        current_run.log_warning(f"Temp file cleanup failed: {err}")
+    return output_dir / file_name
 
 
 def clean_string(input_str: str) -> str:
