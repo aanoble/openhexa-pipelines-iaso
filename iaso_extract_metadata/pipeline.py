@@ -24,7 +24,7 @@ from openhexa.toolbox.iaso import IASO, dataframe
 @parameter(
     "project",
     name="Projects",
-    type=str,
+    type=int,
     widget=IASOWidget.IASO_PROJECTS,
     connection="iaso_connection",
     required=True,
@@ -32,8 +32,16 @@ from openhexa.toolbox.iaso import IASO, dataframe
 @parameter(
     "form_id",
     name="Form ID",
-    type=str,
+    type=int,
     widget=IASOWidget.IASO_FORMS,
+    connection="iaso_connection",
+    required=True,
+)
+@parameter(
+    "org_unit",
+    name="Organizational Unit",
+    type=int,
+    widget=IASOWidget.IASO_ORG_UNITS,
     connection="iaso_connection",
     required=True,
 )
@@ -84,8 +92,8 @@ from openhexa.toolbox.iaso import IASO, dataframe
 )
 def iaso_extract_metadata(
     iaso_connection: IASOConnection,
-    project: str,
-    form_id: str,
+    project: int,
+    form_id: int,
     output_file_name: str,
     output_format: str,
     db_table_name: str,
