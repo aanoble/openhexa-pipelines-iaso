@@ -3,7 +3,7 @@ name: Push extract-orgunits pipeline to OpenHEXA Workspace
 on:
   push:
     paths:
-      - ".github/workflows/push-iaso-extract-orgunits.yml"
+      - ".github/workflows/push_iaso_extract_orgunits.yml"
       - "iaso_extract_orgunits/**"
       - "!iaso_extract_orgunits/docs/**"
       - "!iaso_extract_orgunits/docs/README.md"
