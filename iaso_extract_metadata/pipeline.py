@@ -22,9 +22,17 @@ from openhexa.toolbox.iaso import IASO, dataframe
 @pipeline("iaso_extract_metadata")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
 @parameter(
+    "project",
+    name="Projects",
+    type=str,
+    widget=IASOWidget.IASO_PROJECTS,
+    connection="iaso_connection",
+    required=True,
+)
+@parameter(
     "form_id",
     name="Form ID",
-    type=int,
+    type=str,
     widget=IASOWidget.IASO_FORMS,
     connection="iaso_connection",
     required=True,
