@@ -38,14 +38,6 @@ from openhexa.toolbox.iaso import IASO, dataframe
     required=True,
 )
 @parameter(
-    "org_unit",
-    name="Organizational Unit",
-    type=int,
-    widget=IASOWidget.IASO_ORG_UNITS,
-    connection="iaso_connection",
-    required=True,
-)
-@parameter(
     code="output_file_name",
     type=str,
     name="Path and base name of the output file (without extension)",
