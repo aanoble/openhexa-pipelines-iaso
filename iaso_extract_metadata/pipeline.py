@@ -84,7 +84,8 @@ from openhexa.toolbox.iaso import IASO, dataframe
 )
 def iaso_extract_metadata(
     iaso_connection: IASOConnection,
-    form_id: int,
+    project: str,
+    form_id: str,
     output_file_name: str,
     output_format: str,
     db_table_name: str,
@@ -96,6 +97,7 @@ def iaso_extract_metadata(
     Pipeline functions should only call tasks and should never perform
     IO operations or expensive computations.
     """
+    current_run.log_info(f"Form: {form_id}, project: {project}")
     iaso = authenticate_iaso(iaso_connection)
     form_name = get_form_name(iaso, form_id)
 
