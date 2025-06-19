@@ -1,0 +1,23 @@
+name: Push pipeline on OpenHEXA
+
+on:
+  push:
+    paths:
+      - ".github/workflows/push_iaso_parameter_test.yml"
+      - "iaso_parameter_test/**"
+      - "!iaso_parameter_test/docs/**"
+      - "!iaso_parameter_test/docs/README.md"
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Push pipeline to OpenHEXA
+        uses: blsq/openhexa-push-pipeline-action@v1.0.0
+        with:
+          token: ${{ secrets.OH_TOKEN }}
+          workspace: "civ-pnlp-f01048"
+          pipeline: "iaso-parameter-test"
