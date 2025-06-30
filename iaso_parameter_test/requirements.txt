@@ -1,2 +1,1 @@
-openhexa.sdk>=2.4.0
 openhexa.toolbox==2.7.0

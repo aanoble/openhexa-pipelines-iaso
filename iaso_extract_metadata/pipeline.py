@@ -15,28 +15,12 @@ from openhexa.sdk import (
     pipeline,
     workspace,
 )
-from openhexa.sdk.pipelines.parameter import IASOWidget
 from openhexa.toolbox.iaso import IASO, dataframe
 
 
 @pipeline("iaso_extract_metadata")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
-@parameter(
-    "project",
-    name="Projects",
-    type=int,
-    widget=IASOWidget.IASO_PROJECTS,
-    connection="iaso_connection",
-    required=True,
-)
-@parameter(
-    "form_id",
-    name="Form ID",
-    type=int,
-    widget=IASOWidget.IASO_FORMS,
-    connection="iaso_connection",
-    required=True,
-)
+@parameter("form_id", name="Form ID", type=int, required=True)
 @parameter(
     code="output_file_name",
     type=str,
@@ -84,7 +68,6 @@ from openhexa.toolbox.iaso import IASO, dataframe
 )
 def iaso_extract_metadata(
     iaso_connection: IASOConnection,
-    project: int,
     form_id: int,
     output_file_name: str,
     output_format: str,
@@ -97,7 +80,6 @@ def iaso_extract_metadata(
     Pipeline functions should only call tasks and should never perform
     IO operations or expensive computations.
     """
-    current_run.log_info(f"Form: {form_id}, project: {project}")
     iaso = authenticate_iaso(iaso_connection)
     form_name = get_form_name(iaso, form_id)
 
@@ -233,7 +215,10 @@ def export_to_file(
             questions.write_excel(workbook, workbook.add_worksheet("Questions"))
             choices.write_excel(workbook, workbook.add_worksheet("Choices"))
 
-    if output_format in {".csv", ".parquet"}:
+    elif output_format == ".parquet":
+        questions.join(choices, on="name", how="left").sort("label").write_parquet(output_file_path)
+
+    elif output_format == ".csv":
         questions.join(choices, on="name", how="left").sort("label").write_csv(output_file_path)
 
     current_run.add_file_output(output_file_path.as_posix())

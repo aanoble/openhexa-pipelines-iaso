@@ -1,1 +1,2 @@
-openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
+psycopg2-binary
+openhexa.toolbox==2.7.0

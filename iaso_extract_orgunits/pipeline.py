@@ -37,11 +37,11 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     help="Authenticated connection to IASO platform",
 )
 @parameter(
-    "ou_id",
-    name="Organization Unit ID",
+    "ou_type_id",
+    name="Organization Unit Type ID",
     type=int,
     required=False,
-    help="Specific organization unit identifier to extract",
+    help="Specific organization unit type identifier to extract",
 )
 @parameter(
     code="output_file_name",
@@ -49,7 +49,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     name="Path and base name of the output file (without extension)",
     help=(
         "Path and base name of the output file (without extension) in the workspace files directory"
-        "(default if ou_id is defined: "
+        "(default if ou_type_id is defined: "
         "`iaso-pipelines/extract-orgunits/ou_<ou_type_name>.<output_format>`"
     ),
     required=False,
@@ -94,7 +94,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 )
 def iaso_extract_orgunits(
     iaso_connection: IASOConnection,
-    ou_id: int | None,
+    ou_type_id: int | None,
     output_file_name: str | None,
     output_format: str | None,
     db_table_name: str | None,
@@ -105,7 +105,7 @@ def iaso_extract_orgunits(
 
     Args:
         iaso_connection: Authenticated IASO connection parameters
-        ou_id: Optional specific organization unit identifier
+        ou_type_id: Optional specific organization unit type identifier
         output_file_name: Base name for output file in workspace files directory
         output_format: File format for exporting data
         db_table_name: Target database table name for storage
@@ -116,11 +116,11 @@ def iaso_extract_orgunits(
 
     iaso_client = authenticate_iaso(iaso_connection)
 
-    org_units_df = fetch_org_units(iaso_client, ou_id)
+    org_units_df = fetch_org_units(iaso_client, ou_type_id)
 
     output_file_path = export_to_file(
         org_units_df=org_units_df,
-        ou_id=ou_id,
+        ou_type_id=ou_type_id,
         output_file_name=output_file_name,
         output_format=output_format,
     )
@@ -159,12 +159,12 @@ def authenticate_iaso(connection: IASOConnection) -> IASO:
 
 
 # @iaso_extract_orgunits.task
-def fetch_org_units(iaso_client: IASO, org_unit_id: int | None) -> pl.DataFrame:
+def fetch_org_units(iaso_client: IASO, ou_type_id: int | None) -> pl.DataFrame:
     """Retrieve organizational units data from IASO.
 
     Args:
         iaso_client: Authenticated IASO client
-        org_unit_id: Optional specific organization unit ID
+        ou_type_id: Optional specific organization unit type identifier
 
     Returns:
         DataFrame containing organizational units data
@@ -174,19 +174,16 @@ def fetch_org_units(iaso_client: IASO, org_unit_id: int | None) -> pl.DataFrame:
     """
     # current_run.log_info(f"{iaso_client.api_client.server_url}")
     try:
-        if org_unit_id:
+        if ou_type_id:
             response = iaso_client.api_client.get("/api/orgunittypes")
             org_type_df = pl.DataFrame(response.json()["orgUnitTypes"]).filter(
-                pl.col("id") == org_unit_id
+                pl.col("id") == ou_type_id
             )
 
             if org_type_df.is_empty():
-                raise ValueError(f"No organization type found for ID {org_unit_id}")
+                raise ValueError(f"No organization type found for ID {ou_type_id}")
 
-            org_type_name = org_type_df["name"][0]
-            return get_organisation_units(iaso_client=iaso_client, ou_id=org_unit_id).filter(
-                pl.col("org_unit_type") == org_type_name
-            )
+            return get_organisation_units(iaso_client=iaso_client, ou_type_id=ou_type_id)
 
         return get_organisation_units(iaso_client)
 
@@ -195,12 +192,12 @@ def fetch_org_units(iaso_client: IASO, org_unit_id: int | None) -> pl.DataFrame:
         raise
 
 
-def get_organisation_units(iaso_client: IASO, ou_id: int | None = None) -> pl.DataFrame:
+def get_organisation_units(iaso_client: IASO, ou_type_id: int | None = None) -> pl.DataFrame:
     """Retrieve organizational units data from IASO.
 
     Args:
         iaso_client: Authenticated IASO client
-        ou_id: Optional specific organization unit ID
+        ou_type_id: Optional specific organization unit type ID
 
     Returns:
         DataFrame containing organizational units data
@@ -209,9 +206,9 @@ def get_organisation_units(iaso_client: IASO, ou_id: int | None = None) -> pl.Da
         ValueError: If specified org unit ID is not found
     """
     try:
-        if ou_id:
+        if ou_type_id:
             response = iaso_client.api_client.get(
-                url="api/orgunits", params={"csv": True, "orgUnitTypeId": ou_id}, stream=True
+                url="api/orgunits", params={"csv": True, "orgUnitTypeId": ou_type_id}, stream=True
             )
             response.raise_for_status()
 
@@ -264,7 +261,7 @@ def get_organisation_units(iaso_client: IASO, ou_id: int | None = None) -> pl.Da
 def export_to_file(
     output_format: str,
     org_units_df: pl.DataFrame,
-    ou_id: int | None,
+    ou_type_id: int | None,
     output_file_name: str | None,
 ) -> Path:
     """Export organizational units data to specified file format.
@@ -272,7 +269,7 @@ def export_to_file(
     Args:
         output_format: File format extension for the output file.
         org_units_df: DataFrame containing organizational units data.
-        ou_id: Optional specific organization unit ID.
+        ou_type_id: Optional specific organization unit type identifier.
         output_file_name: Optional custom output file name.
 
     Returns:
@@ -281,7 +278,7 @@ def export_to_file(
     output_file_path = _generate_output_file_path(
         output_format=output_format,
         org_units_df=org_units_df,
-        org_unit_id=ou_id,
+        ou_type_id=ou_type_id,
         output_file_name=output_file_name,
     )
 
@@ -336,7 +333,6 @@ def export_to_file(
 # @iaso_extract_orgunits.task
 def export_to_database(
     org_units_df: pl.DataFrame,
-    # org_unit_id: int | None,
     table_name: str | None,
     save_mode: str,
 ) -> gpd.GeoDataFrame:
@@ -414,7 +410,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
 def _generate_output_file_path(
     output_format: str,
     org_units_df: pl.DataFrame,
-    org_unit_id: int | None,
+    ou_type_id: int | None,
     output_file_name: str | None,
 ) -> Path:
     """Generate the default output file path for exported organizational units data.
@@ -422,7 +418,7 @@ def _generate_output_file_path(
     Args:
         output_format: File format extension for the output file.
         org_units_df: DataFrame containing organizational units data.
-        org_unit_id: Optional specific organization unit ID.
+        ou_type_id: Optional specific organization unit type identifier.
         output_file_name: Optional custom output file name.
 
     Returns:
@@ -464,7 +460,7 @@ def _generate_output_file_path(
 
     base_name = (
         "orgunits"
-        if org_unit_id is None
+        if ou_type_id is None
         else f"ou_{clean_string(org_units_df['org_unit_type'].unique()[0])}"
     )
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M")

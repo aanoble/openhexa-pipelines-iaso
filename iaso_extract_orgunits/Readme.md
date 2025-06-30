@@ -4,22 +4,15 @@
 
 This pipeline extracts organizational units (OU) data from the IASO platform, processes spatial geometries, and exports it to either a spatial database or geopackage dataset. It supports both full exports and filtered extracts based on organizational unit type.
 
-It supports:
-- Full extractions or filtered extracts by organization unit type.
-- Multiple export formats including spatial and non-spatial data.
-- Optional export to PostGIS databases or versioned OpenHexa datasets.
-
 ## ⚙️ Parameters
 
-| Parameter            | Type             | Required | Default   | Description |
-|----------------------|------------------|----------|-----------|-------------|
-| `iaso_connection`    | `IASOConnection` | ✅       | -         | Authenticated IASO API connection |
-| `ou_id`              | `int`            | ❌       | `None`    | Specific organization unit type ID to filter (optional). |
-| `output_file_name`   | `str`            | ❌       | Auto      | Custom output filename (with or without extension) |
-| `output_format`      | `str`            | ❌       | `.gpkg`   | Export format: `.csv`, `.geojson`, `.parquet`, `.shp`, `.gpkg`, `.topojson`, `.xlsx` |
-| `db_table_name`      | `str`            | ❌       | -         | If provided, exports the result to this DB table |
-| `save_mode`          | `str`            | ❌       | `replace` | Database write mode: `replace` or `append` |
-| `dataset`            | `Dataset`        | ❌       | -         | Target dataset for geopackage export (optional). |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `iaso_connection` | `IASOConnection` | ✅ | - | Authenticated IASO connection credentials |
+| `ou_id` | `int` | ❌ | - | Specific organization unit type ID to filter (optional).|
+| `db_table_name` | `str` | ❌ | `ou_<type>` or `orgunits` | Target database table name |
+| `save_mode` | `str` | ✅ | `"replace"` | Database write mode: `append` or `replace` |
+| `dataset` | `Dataset` | ❌ | - | Target dataset for geopackage export (optional).|
 
 ## 📥 Data Acquisition Process
 
@@ -34,11 +27,6 @@ It supports:
 3. **Geometry Processing**  
    - Convert GeoJSON to proper spatial types (Point/MultiPolygon)
    - Coordinate system standardization (EPSG:4326)
-
-4. **Export Options**
-   - File export (to disk)
-   - Database export (PostGIS)
-   - Dataset export (OpenHexa versioned)
 
 ## 🔄 Data Processing Workflow
 
@@ -59,7 +47,6 @@ It supports:
 ```
 
 ### 3. Spatial Export Options
-- **File**: Write to OpenHEXA file directory
 - **Database**: Write to PostGIS with topology preservation
 - **Dataset**: Versioned geopackage exports with timestamps
 

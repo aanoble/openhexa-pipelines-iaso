@@ -4,14 +4,14 @@ from openhexa.sdk.pipelines.parameter import IASOWidget
 
 @pipeline("iaso_parameter_test")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
-@parameter(
-    "project",
-    name="Projects",
-    type=int,
-    widget=IASOWidget.IASO_PROJECTS,
-    connection="iaso_connection",
-    required=True,
-)
+# @parameter(
+#     "project",
+#     name="Projects",
+#     type=int,
+#     widget=IASOWidget.IASO_PROJECTS,
+#     connection="iaso_connection",
+#     required=True,
+# )
 @parameter(
     "form",
     name="Form",
@@ -30,16 +30,17 @@ from openhexa.sdk.pipelines.parameter import IASOWidget
     required=False,
 )
 def iaso_parameter_test(
-    iaso_connection: IASOConnection, project: int, form: int, org_unit: list[int]
+    iaso_connection: IASOConnection,
+    form: int,
+    org_unit: list[int],
+    # project: int
 ):
     """Write your pipeline orchestration here.
 
     Pipeline functions should only call tasks and should never perform IO operations or expensive
     computations.
     """
-    current_run.log_info(
-        f"Form: {form}, project: {project}, org_unit: {', '.join(map(str, org_unit))}"
-    )
+    current_run.log_info(f"Form: {form}, org_unit: {', '.join(map(str, org_unit))}")
 
 
 if __name__ == "__main__":
