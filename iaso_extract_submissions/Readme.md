@@ -2,100 +2,51 @@
 
 ## 📌 Description
 
-This pipeline extracts form submission data from the IASO platform, processes choice values into human-readable labels, and exports results to databases or versioned datasets. Supports incremental updates and schema validation.
+This pipeline extracts and processes form submissions data from the IASO platform. Key features:
+- Authenticates with IASO using provided credentials
+- Fetches form submissions (optionally filtered by last updated date)
+- Converts choice codes to human-readable labels (optional)
+- Processes and cleans the data (deduplicates columns, handles list-type responses)
+- Exports to multiple formats (CSV, Parquet, Excel)
+- Supports database export with schema validation
+- Integrates with OpenHexa Datasets for versioned data storage
+
+## 💻 Usage Example
+![run image](docs/images/example_run.png)
 
 ## ⚙️ Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `iaso_connection` | `IASOConnection` | ✅ | - | IASO API credentials |
-| `form_id` | `int` | ✅ | - | Target form identifier |
-| `last_updated` | `str` | ❌ | - | An ISO-formatted date (YYYY-MM-DD) used as a cutoff for incremental data extraction. |
-| `choices_to_labels` | `bool` | ❌ | `True` | Flag to determine if choice codes should be replaced with human-readable labels. |
-| `db_table_name` | `str` | ❌ | `form_<name>` | Target name for the database table (if not provided, defaults to `form_<form_name>`).|
-| `save_mode` | `str` | ✅ | `"replace"` | Write mode: `append`/`replace` |
-| `dataset` | `Dataset` | ❌ | - | Target dataset for CSV exports |
-
-## 📥 Data Acquisition Process
-
-1. **IASO Authentication**  
-   - Validate credentials through OAuth2
-   - Establish secure API connection
-
-2. **Form Verification**  
-   - Validate form existence
-   - Sanitize form name
-
-3. **Submission Retrieval**  
-   - Fetch submissions with optional date filter
-   - Automatic pagination handling
-
-4. **Data Processing**  
-   - Choice code → label conversion
-   - Column deduplication
-   - List-type field expansion
-
-## 🔄 Data Processing Workflow
-
-### 1. Authentication & Validation
-- Credential verification
-- Form ID existence check
-
-### 2. Export Options
-- **Database**: Schema validation with auto-fallback
-- **Dataset**: Versioned CSV exports with timestamps
-
-### 4. Quality Assurance
-- Column name sanitization
-- Duplicate handling
-- Temporary file cleanup
-
-## 💻 Usage Example
-![run image](docs/images/example_run.png)
+| `iaso_connection` | IASOConnection | Yes | - |Authentication details for IASO (url, username, password) |
+| `form_id` | int | Yes | - |ID of the form to extract submissions from |
+| `last_updated` | str | No | - | ISO date (YYYY-MM-DD) for incremental extraction (only submissions updated after this date) |
+| `choices_to_labels` | bool | No | `True` | Convert choice codes to labels |
+| `output_file_name` | str | No | - | Custom output path/filename (without extension) |
+| `output_format` | str | No | `.parquet` | Export file format (`.csv`, `.parquet`, `.xlsx`) |
+| `db_table_name` | str | No | - | Target database table name for storage |
+| `save_mode` | str | No | `replace` | Database write mode (`append` or `replace`) |
+| `dataset` | Dataset | No | - | Target OpenHexa Dataset for export |
 
 ## 🔄 Pipeline Flow
-
 ```mermaid
-flowchart TD
-    A[Pipeline Start] --> B[IASO Authentication]
-    B --> C{Credentials Valid?}
-    C -->|Yes| D[Fetch Form Metadata]
-    C -->|No| E[Log Authentication Error]
-    D --> F[Parse Cutoff Date]
-    F --> G[Fetch Submissions]
-    G --> H{Convert Choices?}
-    H -->|Yes| I[Replace Codes with Labels]
-    H -->|No| J[Keep Original Values]
-    I --> K[Process Columns]
-    J --> K
-    K --> L{Database Export?}
-    L -->|Yes| M[Validate Schema]
+graph TD
+    A([Start Pipeline]) --> B[Authenticate with IASO]
+    B --> C[Get Form Name]
+    C --> D[Parse Cutoff Date]
+    D --> E[Fetch Submissions]
+    E --> F{Convert choices to labels?}
+    F -->|Yes| G[Replace Choice Codes with Labels]
+    F -->|No| H[Deduplicate Columns]
+    G --> H
+    H --> I[Process List Columns]
+    I --> J{Output Selection}
+    J -->|File Export| K[Generate output path]
+    K --> L[Export to file]
+    J -->|Database Export| M[Validate Schema]
     M --> N[Write to Database]
-    N --> O{Save Mode}
-    O -->|Replace| P[Overwrite Table]
-    O -->|Append| Q[Add New Records]
-    L -->|No| R[Prepare Dataset Export]
-    R --> S[Generate CSV]
-    S --> T[Version Dataset]
-    T --> U[Clean Temporary Files]
-    U --> V[Pipeline Completion]
-    E --> V
+    J -->|Dataset Export| O[Add to Dataset Version]
+    L --> P([End Pipeline])
+    N --> P
+    O --> P
 ```
-
-## 🛠️ Technical Features
-- **Incremental Loading**: Date-filtered extraction
-- **Data Integrity**: Schema validation pre-export
-- **Language Support**: French label conversion
-- **Error Resilience**: Transactional writes with rollback
-
-## 📦 Output Formats
-| Destination | Format | Features |
-|-------------|--------|----------|
-| Database | SQL Table | Type-safe storage with schema validation |
-| Dataset | Versioned CSV | Historical tracking with metadata |
-
-## 🔒 Data Security
-- Credential encryption through OpenHexa
-- Temporary file purging
-- GDPR-compliant data handling
-- API request throttling
