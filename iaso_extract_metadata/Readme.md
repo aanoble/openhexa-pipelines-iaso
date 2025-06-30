@@ -2,77 +2,47 @@
 
 ## 📌 Description
 
-This pipeline is designed to extract metadata from an IASO form, process it, and store it in a database or dataset. The extracted metadata includes questions and choices from the form, which can be used for reporting, analysis, or integration into other systems.
-
-
-## ⚙️ Parameters
-
-| Parameter        | Type            | Required | Default | Description |
-|-----------------|----------------|----------|---------|-------------|
-| `iaso_connection` | `IASOConnection` | ✅ | - | IASO connection credentials. |
-| `form_id` | `int` | ✅ | - | The ID of the IASO form to extract metadata from. |
-| `db_table_name` | `str` | ❌ | `md_<form_name>` | Name of the database table to store metadata. |
-| `save_mode` | `str` | ✅ | `"replace"` | Saving mode: `"append"` or `"replace"`. |
-| `dataset` | `Dataset` | ❌ | - | Dataset to store metadata files. |
-
-
-## 📥 Data Acquisition Process
-
-1. **Authenticate to IASO**: Connects to the IASO API using the provided credentials.
-2. **Retrieve Form Name**: Fetches and sanitizes the name of the form based on its ID.
-3. **Extract Metadata**: Retrieves form questions and choices from IASO.
-4. **Export Metadata**:
-   - To a database if `db_table_name` is provided.
-   - To a dataset if `dataset` is provided. 
-
-## 🔄 Data Processing Workflow
-
-1. **Authentication**
-   - Validate IASO credentials
-   - Establish API connection
-
-2. **Form Verification**
-   - Confirm form existence
-   - Sanitize form name using `clean_string()`
-
-3. **Metadata Extraction**
-   - Retrieve structured metadata:
-   ```python
-   {
-     "questions": ["name", "type", "label", "calculate"],
-     "choices": ["name", "value", "label"]
-   }
-   ```
-
-4. **Data Export**
-   - Database: Merged relational structure
-   - Dataset: Versioned Excel exports
-
-5. **Resource Management**
-   - Temporary file cleanup
-   - Connection termination
+This pipeline extracts detailed metadata about IASO forms, including questions and choices definitions. Key features:
+- Authenticates with IASO using provided credentials
+- Retrieves form structure and question definitions
+- Fetches choice options with labels and values
+- Exports to multiple formats (CSV, Parquet, Excel)
+- Supports database export with join between questions and choices
+- Integrates with OpenHexa Datasets for versioned metadata storage
 
 ## 💻 Usage Example
 ![run image](docs/images/example_run.png)
 
-## 🔄 Flow
+## ⚙️ Parameters
 
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `iaso_connection` | IASOConnection | Yes | - | Authentication details for IASO (url, username, password) |
+| `form_id` | int | Yes | - | ID of the form to extract metadata from |
+| `output_file_name` | str | No | - | Custom output path/filename (without extension) |
+| `output_format` | str | No | `.parquet` | Export file format (`.csv`, `.parquet`, `.xlsx`) |
+| `db_table_name` | str | No | - | Target database table name for storage |
+| `save_mode` | str | No | `replace` | Database write mode (`append` or `replace`) |
+| `dataset` | Dataset | No | - | Target OpenHexa Dataset for export |
+
+
+## Execution Workflow
 ```mermaid
-flowchart TD
-    A[Pipeline Start] --> B[IASO Authentication]
-    B --> C{Credentials Valid?}
-    C -->|Yes| D[Retrieve Form Name]
-    C -->|No| E[Log Authentication Error]
-    D --> F[Extract Metadata]
-    F --> G{Database Export?}
-    G -->|Yes| H[Write to Database]
-    G -->|No| I[Dataset Export]
-    H --> J{Save Mode}
-    J -->|Replace| K[Overwrite Existing Data]
-    J -->|Append| L[Add New Records]
-    I --> M[Create Dataset Version]
-    M --> N[Generate Excel Export]
-    N --> O[Clean Temporary Files]
-    O --> P[Pipeline Completion]
-    E --> P
+graph TD
+    A([Start Pipeline]) --> B[Authenticate with IASO]
+    B --> C[Get Form Name]
+    C --> D[Fetch Form Metadata]
+    D --> E[Extract Latest Version]
+    E --> F[Process Questions]
+    E --> G[Process Choices]
+    F --> H{Output Selection}
+    G --> H
+    H -->|File Export| I[Generate output path]
+    I --> J[Export to selected format]
+    H -->|Database Export| K[Join Questions/Choices]
+    K --> L[Write to Database]
+    H -->|Dataset Export| M[Add to Dataset Version]
+    J --> N([End Pipeline])
+    L --> N
+    M --> N
 ```
