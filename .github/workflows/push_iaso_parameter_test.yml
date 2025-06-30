@@ -15,9 +15,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Push pipeline to OpenHEXA
-        uses: blsq/openhexa-push-pipeline-action@v1.0.0
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v2
         with:
-          token: ${{ secrets.OH_TOKEN }}
+          python-version: '3.11'
+      
+      - name: Configure OpenHEXA CLI
+        uses: blsq/openhexa-cli-action@v1
+        with:
           workspace: "civ-pnlp-f01048"
-          pipeline: "iaso-parameter-test"
+          token: ${{ secrets.OH_TOKEN }}
+
+      - name: Push pipeline to OpenHEXA
+        run: |
+          openhexa pipelines push iaso_parameter_test \
+            --code "iaso-parameter-test" \
+            --description "${{ github.event.head_commit.message }}" \
+            --link "https://github.com/aanoble/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
+            --yes
