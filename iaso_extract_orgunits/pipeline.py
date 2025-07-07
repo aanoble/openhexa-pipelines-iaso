@@ -373,7 +373,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         dataset: Target dataset for export
     """
     latest_version = dataset.latest_version
-    if latest_version and in_dataset_version(file_path, latest_version):
+    if bool(latest_version) and in_dataset_version(file_path, latest_version):
         current_run.log_info(
             f"Organizational units file `{file_path.name}` already exists in dataset version "
             f"`{latest_version.name}` and no changes have been detected"
@@ -381,7 +381,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         return
 
     version_number = int(latest_version.name.lstrip("v")) + 1 if latest_version else 1
-    version = dataset.create_version(name=f"v{version_number}")
+    version = dataset.create_version(f"v{version_number}")
     version.add_file(file_path, file_path.name)
     current_run.log_info(
         f"Organizational units file `{file_path.name}` successfully added to {dataset.name} "
