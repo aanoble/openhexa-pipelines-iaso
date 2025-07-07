@@ -288,6 +288,7 @@ def export_to_file(
 
     if output_format in {".gpkg", ".geojson", ".shp", ".topojson"}:
         geo_df = _prepare_geodataframe(org_units_df)
+        geo_df = geo_df.sort_values(by=list(geo_df.columns)).reset_index(drop=True)
 
         if output_format == ".shp":
             for col in geo_df.select_dtypes(
@@ -328,6 +329,9 @@ def export_to_file(
             org_units_df.to_pandas().to_excel(output_file_path, index=False)
 
     current_run.add_file_output(output_file_path.as_posix())
+    if output_format == ".shp":
+        for suffix in [".shx", ".dbf", ".prj", ".cpg"]:
+            current_run.add_file_output(output_file_path.with_suffix(suffix).as_posix())
 
     return output_file_path
 
@@ -383,7 +387,13 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
 
     version_number = int(latest_version.name.lstrip("v")) + 1 if latest_version else 1
     version = dataset.create_version(f"v{version_number}")
-    version.add_file(file_path, file_path.name)
+    
+    if file_path.suffix != ".shp":
+        version.add_file(file_path, file_path.name)
+    else:
+        for suffix in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+            version.add_file(file_path.with_suffix(suffix), file_path.with_suffix(suffix).name)
+
     current_run.log_info(
         f"Organizational units file `{file_path.name}` successfully added to {dataset.name} "
         f"dataset in version `{version.name}`"
