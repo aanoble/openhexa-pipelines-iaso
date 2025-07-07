@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from datetime import datetime
@@ -9,13 +10,13 @@ from pathlib import Path
 
 import polars as pl
 from openhexa.sdk import (
-    Dataset,
     IASOConnection,
     current_run,
     parameter,
     pipeline,
     workspace,
 )
+from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.toolbox.iaso import IASO, dataframe
 
 # Precompile regex pattern for string cleaning
@@ -313,48 +314,28 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
         )
 
 
-def export_to_dataset(dataset: Dataset, file_path: Path):
+def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
     """Saves form submissions to the specified dataset.
 
     Args:
-        dataset (Dataset): The dataset where the submissions will be stored.
         file_path (Path): The path to the file containing the submissions data.
-
-    Raises:
-        RuntimeError: If dataset export fails
+        dataset (Dataset): The dataset where the submissions will be stored.
     """
-    try:
-        stem = Path(file_path).stem
-        match = re.match(r"^(.*)_\d{4}-\d{2}-\d{2}_\d{2}:\d{2}$", stem)
-        file_name = match.group(1) if match else clean_string(stem)
-
-        version = next((v for v in dataset.versions if v.name == file_name), None)
-        version = version or dataset.create_version(file_name)
-
-        try:
-            version.add_file(file_path, file_path.name)
-        except ValueError as err:
-            if err.args and "already exists" in err.args[0]:
-                msg_critical = (
-                    f"File `{file_path.name}` already exists in dataset version `{version.name}`. "
-                )
-                current_run.log_critical(msg_critical)
-
-                file_name = file_path.with_name(
-                    f"{file_path.name}_{datetime.now().strftime('%Y-%m-%d_%H:%M')}{file_path.suffix}"
-                ).name
-
-                current_run.log_info(f"Renaming file to `{file_name}` to avoid conflict")
-
-                version.add_file(file_path, file_name)
-
+    latest_version = dataset.latest_version
+    if latest_version and in_dataset_version(file_path, latest_version):
         current_run.log_info(
-            f"Form submissions successfully add to {dataset.name} dataset "
-            f"in `{version.name}` version"
+            f"Form submissions file `{file_path.name}` already exists in dataset version "
+            f"`{latest_version.name}` and no changes have been detected"
         )
-    except Exception as err:
-        current_run.log_error(f"Dataset export failed: {err}")
-        raise RuntimeError("Dataset export operation failed") from err
+        return
+
+    version_number = int(latest_version.name.lstrip("v")) + 1 if latest_version else 1
+    version = dataset.create_version(name=f"v{version_number}")
+    version.add_file(file_path, file_path.name)
+    current_run.log_info(
+        f"Form submissions file `{file_path.name}` successfully added to {dataset.name} "
+        f"dataset in version `{version.name}`"
+    )
 
 
 def _process_submissions(submissions: pl.DataFrame) -> pl.DataFrame:
@@ -474,6 +455,41 @@ def clean_string(input_str: str) -> str:
     cleaned = "".join(c for c in normalized if not unicodedata.combining(c))
     sanitized = CLEAN_PATTERN.sub("", cleaned)
     return sanitized.strip().replace(" ", "_").lower()
+
+
+def sha256_of_file(file_path: Path) -> str:
+    """Calculate the SHA-256 hash of a file.
+
+    Args:
+        file_path (Path): Path to the file.
+
+    Returns:
+        str: SHA-256 hash of the file content.
+    """
+    hasher = hashlib.sha256()
+    with file_path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def in_dataset_version(file_path: Path, dataset_version: DatasetVersion) -> bool:
+    """Check if a file is in the specified dataset version.
+
+    Args:
+        file_path (Path): Path to the file.
+        dataset_version (DatasetVersion): The dataset version to check against.
+
+    Returns:
+        bool: True if the file is in the dataset version, False otherwise.
+    """
+    file_hash = sha256_of_file(file_path)
+    for file in dataset_version.files:
+        remote_hash = hashlib.sha256()
+        remote_hash.update(file.read())
+        if file_hash == remote_hash.hexdigest():
+            return True
+    return False
 
 
 if __name__ == "__main__":
