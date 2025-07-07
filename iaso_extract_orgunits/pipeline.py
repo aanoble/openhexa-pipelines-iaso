@@ -118,6 +118,7 @@ def iaso_extract_orgunits(
     iaso_client = authenticate_iaso(iaso_connection)
 
     org_units_df = fetch_org_units(iaso_client, ou_type_id)
+    org_units_df = org_units_df.select(sorted(org_units_df.columns)).sort(org_units_df.columns)
 
     output_file_path = export_to_file(
         org_units_df=org_units_df,

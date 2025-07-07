@@ -213,8 +213,12 @@ def export_to_file(
     current_run.log_info(f"Exporting form metadata to file `{output_file_path}`")
     if output_format == ".xlsx":
         with xlsxwriter.Workbook(output_file_path) as workbook:
-            questions.write_excel(workbook, workbook.add_worksheet("Questions"))
-            choices.write_excel(workbook, workbook.add_worksheet("Choices"))
+            questions.select(sorted(questions.columns)).sort(questions.columns).write_excel(
+                workbook, workbook.add_worksheet("Questions")
+            )
+            choices.select(sorted(choices.columns)).sort(choices.columns).write_excel(
+                workbook, workbook.add_worksheet("Choices")
+            )
 
     elif output_format == ".parquet":
         questions.join(choices, on="name", how="left").sort("label").write_parquet(output_file_path)
