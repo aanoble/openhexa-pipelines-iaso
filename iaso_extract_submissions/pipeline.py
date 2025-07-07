@@ -363,7 +363,9 @@ def _process_submissions(submissions: pl.DataFrame) -> pl.DataFrame:
     if binary_exprs:
         submissions = submissions.with_columns(binary_exprs)
 
-    return submissions.drop(list_cols).select(pl.exclude("instanceid"), pl.col("instanceid"))
+    submissions = submissions.drop(list_cols).select(pl.exclude("instanceid"), pl.col("instanceid"))
+
+    return submissions.select(sorted(submissions.columns)).sort(submissions.columns)
 
 
 def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
