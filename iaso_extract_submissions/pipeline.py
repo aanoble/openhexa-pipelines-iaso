@@ -17,6 +17,7 @@ from openhexa.sdk import (
     workspace,
 )
 from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
+from openhexa.sdk.pipelines.parameter import IASOWidget
 from openhexa.toolbox.iaso import IASO, dataframe
 
 # Precompile regex pattern for string cleaning
@@ -25,7 +26,14 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 
 @pipeline("iaso_extract_submissions")
 @parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
-@parameter("form_id", name="Form ID", type=int, required=True)
+@parameter(
+    "form_id",
+    name="Form ID",
+    type=int,
+    widget=IASOWidget.IASO_FORMS,
+    connection="iaso_connection",
+    required=True,
+)
 @parameter(
     "last_updated",
     name="Last Updated Date",
