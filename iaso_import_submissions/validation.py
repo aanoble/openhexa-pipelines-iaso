@@ -188,7 +188,10 @@ def validate_global_data(
         try:
             # expr_str is expected to be a Polars expression string using `pl` namespace
             expr = eval(expr_str, {"pl": pl})
-            df = df.with_columns(expr.alias(col_name))
+            df = df.with_columns(expr.round().cast(pl.Int64).alias(col_name))
+            current_run.log_info(
+                f"Added calculated column '{col_name}' to submissions after computation."
+            )
         except Exception as exc:  # keep narrow enough but robust
             current_run.log_critical(
                 f"Failed to compute calculated column '{col_name}': {exc}; filling with 0"
@@ -281,7 +284,10 @@ def validate_global_data(
 
 
 def _calculate_to_polars_expr(calc_str: str) -> str:
-    expr = calc_str
+    expr = calc_str.strip()
+
+    if expr in ("0", "0.0"):
+        return "pl.lit(0)"
 
     expr = re.sub(r"\$\{([^}]+)\}", r'pl.col("\1")', expr)
 

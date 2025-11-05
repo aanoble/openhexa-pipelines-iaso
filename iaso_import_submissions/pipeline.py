@@ -185,11 +185,8 @@ def generate_templates_for_versions(
         else:
             latest_version_id = ""
 
-        # Run global validation to ensure summary columns exist
-        df_for_template = validate_global_data(df=df, questions=questions, choices=choices)
-
         dico_xml_template["latest_version"] = generate_xml_template(
-            df_submissions=df_for_template,
+            df=df,
             questions=questions,
             id_form=str(meta.get("form_id") or ""),
             form_version=latest_version_id,
@@ -200,7 +197,7 @@ def generate_templates_for_versions(
                 iaso=iaso, form_id=form_id, form_version=version
             )
             dico_xml_template[version] = generate_xml_template(
-                df_submissions=df,
+                df=df,
                 questions=questions_for_version,
                 id_form=str(meta.get("form_id") or ""),
                 form_version=version,
@@ -276,9 +273,6 @@ def handle_create_mode(
     """
     summary = {"imported": 0, "updated": 0, "ignored": 0, "deleted": 0}
 
-    constraints_present = "constraints_validation_summary" in df.columns
-    choices_present = "choices_validation_summary" in df.columns
-
     default_output = f"iaso-pipelines/import-submissions/{form_name}"
     output_dir = Path(workspace.files_path) / (output_directory or default_output)
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -287,6 +281,9 @@ def handle_create_mode(
         try:
             # Choose template and determine validity
             if "latest_version" in dico_xml_template:
+                constraints_present = "constraints_validation_summary" in df.columns
+                choices_present = "choices_validation_summary" in df.columns
+
                 if constraints_present and choices_present:
                     is_valid = bool(record.get("constraints_validation_summary")) and bool(
                         record.get("choices_validation_summary")
@@ -412,11 +409,19 @@ def push_submissions(
 
     headers = get_token_headers(iaso)
     meta = fetch_form_meta(iaso, form_id)
-    dico_xml_template = generate_templates_for_versions(iaso, df, form_id, meta, questions, choices)
 
     if mode == "DELETE":
-        summary = handle_delete_mode(iaso=iaso, df=df, headers=headers)
-    else:
+        return handle_delete_mode(iaso=iaso, df=df, headers=headers)
+
+    if mode == "CREATE":
+        if "form_version" not in df.columns:
+            # Run global validation to ensure summary columns exist
+            df = validate_global_data(df=df, questions=questions, choices=choices)
+
+        dico_xml_template = generate_templates_for_versions(
+            iaso, df, form_id, meta, questions, choices
+        )
+
         summary = handle_create_mode(
             iaso=iaso,
             df=df,
@@ -429,8 +434,8 @@ def push_submissions(
             output_directory=output_directory,
             dico_xml_template=dico_xml_template,
         )
+        current_run.log_info(f"Push finished. Summary: {summary}")
 
-    current_run.log_info(f"Push finished. Summary: {summary}")
     return summary
 
 
