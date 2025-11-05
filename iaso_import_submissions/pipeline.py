@@ -251,6 +251,7 @@ def handle_delete_mode(iaso: IASO, df: pl.DataFrame, headers: dict) -> dict[str,
             current_run.log_error(f"Error processing record (id={record.get('id')}): {exc}")
             summary["ignored"] += 1
 
+    current_run.log_info(f"Deleted submissions successfully. Summary: {summary}")
     return summary
 
 
@@ -396,8 +397,6 @@ def push_submissions(
     Returns:
         dict[str, int]: summary counts for imported/updated/ignored/deleted.
     """
-    current_run.log_info(f"Pushing {len(df)} submissions to IASO for app ID {app_id} start")
-
     mode = (import_strategy or "CREATE").upper()
     if mode not in ("CREATE", "DELETE"):
         msg = (
@@ -411,6 +410,9 @@ def push_submissions(
     meta = fetch_form_meta(iaso, form_id)
 
     if mode == "DELETE":
+        current_run.log_info(
+            f"Starting deletion of {len(df)} submissions in IASO for app ID {app_id}."
+        )
         return handle_delete_mode(iaso=iaso, df=df, headers=headers)
 
     if mode == "CREATE":
@@ -421,7 +423,7 @@ def push_submissions(
         dico_xml_template = generate_templates_for_versions(
             iaso, df, form_id, meta, questions, choices
         )
-
+        current_run.log_info(f"Pushing {len(df)} submissions to IASO for app ID {app_id} start")
         summary = handle_create_mode(
             iaso=iaso,
             df=df,
