@@ -103,7 +103,7 @@ def validate_data_structure(
             for name in questions.filter(pl.col("type") == "integer")["name"].unique()
         },
         **{
-            name: pl.Float64
+            name: pl.String
             for name in questions.filter(pl.col("type") == "calculate")["name"].unique()
         },
     }

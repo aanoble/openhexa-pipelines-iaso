@@ -136,6 +136,7 @@ def iaso_import_submissions(
         current_run.log_warning(f"Data structure validation warning:\n{warning}")
 
     for col_name, (expected, _actual) in validation_result["invalid_types"].items():
+        current_run.log_info(f"Casting column '{col_name}' to expected type '{expected}'.")
         df_submissions = df_submissions.with_columns(
             pl.col(col_name).cast(CAST_MAP[expected]).alias(col_name)
         )
