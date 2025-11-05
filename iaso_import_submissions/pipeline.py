@@ -326,7 +326,8 @@ def handle_create_mode(
 
             instance_body = [
                 {
-                    "orgUnitId": record.get("org_unit_id"),
+                    "id": the_uuid,
+                    "orgUnitId": int(record.get("org_unit_id")),  # type: ignore
                     "created_at": int(datetime.now().timestamp()),
                     "formId": form_id,
                     "accuracy": 0,
