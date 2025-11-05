@@ -424,7 +424,6 @@ def push_submissions(
             strict_validation=strict_validation,
             output_directory=output_directory,
             dico_xml_template=dico_xml_template,
-            meta=meta,
         )
 
     current_run.log_info(f"Push finished. Summary: {summary}")

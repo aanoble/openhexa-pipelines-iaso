@@ -1,0 +1,2 @@
+openhexa.toolbox>=2.8
+fastexcel

@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 import polars as pl
@@ -34,29 +33,10 @@ def read_submissions_file(file_path: Path) -> pl.DataFrame:
                 infer_schema_length=10000,
                 ignore_errors=False,
                 truncate_ragged_lines=True,
-                null_values=["", "null", "NULL", "NaN", "na", "N/A"],
             ),
-            ".parquet": lambda fp: pl.read_parquet(
-                fp,
-                use_pyarrow=True,
-                memory_map=True,
-            ),
-            ".xlsx": lambda fp: pl.read_excel(
-                fp,
-                engine="calamine",
-                read_options={
-                    "infer_schema_length": 10000,
-                    "null_values": ["", "null", "NULL", "NaN", "na", "N/A"],
-                },
-            ),
-            ".xls": lambda fp: pl.read_excel(
-                fp,
-                engine="calamine",
-                read_options={
-                    "infer_schema_length": 10000,
-                    "null_values": ["", "null", "NULL", "NaN", "na", "N/A"],
-                },
-            ),
+            ".parquet": lambda fp: pl.read_parquet(fp, use_pyarrow=True),
+            ".xlsx": lambda fp: pl.read_excel(fp, engine="calamine"),
+            ".xls": lambda fp: pl.read_excel(fp, engine="calamine"),
         }
 
         suffix = file_path.suffix.lower()
