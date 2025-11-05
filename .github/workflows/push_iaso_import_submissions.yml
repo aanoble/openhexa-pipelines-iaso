@@ -1,0 +1,37 @@
+name: Push pipeline iaso-import-submissions on OpenHEXA
+
+on:
+  push:
+    paths:
+      - ".github/workflows/push_iaso_import_submissions.yml"
+      - "iaso_import_submissions/**"
+      - "!iaso_import_submissions/docs/**"
+      - "!iaso_import_submissions/docs/README.md"
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.11'
+      
+      - name: Configure OpenHEXA CLI
+        uses: blsq/openhexa-cli-action@v1
+        with:
+          workspace: "civ-pnlp-f01048"
+          token: ${{ secrets.OH_TOKEN }}
+
+      - name: Push pipeline to OpenHEXA
+        run: |
+          openhexa pipelines push iaso_import_submissions \
+            --code "iaso-import-submissions" \
+            --description "${{ github.event.head_commit.message }}" \
+            --link "https://github.com/aanoble/openhexa-pipelines-iaso/commit/${{ github.sha }}" \
+            --yes

@@ -75,6 +75,16 @@ CAST_MAP = {
     required=False,
 )
 @parameter(
+    "output_directory",
+    type=str,  # type: ignore
+    name="Output directory for import summary",
+    help=(
+        "Directory where the import summary will be saved."
+        "(default if not specified: "
+        "`iaso-pipelines/import-submissions/<form_name>`)"
+    ),
+)
+@parameter(
     "strict_validation",
     type=bool,  # type: ignore
     name="Strict validation of form submissions and file structure.",
@@ -84,16 +94,6 @@ CAST_MAP = {
         "and file structure, raising errors for any discrepancies found."
     ),
     required=False,
-)
-@parameter(
-    "output_directory",
-    type=str,  # type: ignore
-    name="Output directory for import summary",
-    help=(
-        "Directory where the import summary will be saved."
-        "(default if not specified: "
-        "`iaso-pipelines/import-submissions/<form_name>`)"
-    ),
 )
 def iaso_import_submissions(
     iaso_connection: IASOConnection,
@@ -156,7 +156,7 @@ def iaso_import_submissions(
     )
 
 
-def _generate_templates_for_versions(
+def generate_templates_for_versions(
     iaso: IASO,
     df: pl.DataFrame,
     form_id: int,
@@ -408,9 +408,7 @@ def push_submissions(
 
     headers = get_token_headers(iaso)
     meta = fetch_form_meta(iaso, form_id)
-    dico_xml_template = _generate_templates_for_versions(
-        iaso, df, form_id, meta, questions, choices
-    )
+    dico_xml_template = generate_templates_for_versions(iaso, df, form_id, meta, questions, choices)
 
     if mode == "DELETE":
         summary = handle_delete_mode(iaso=iaso, df=df, headers=headers)
