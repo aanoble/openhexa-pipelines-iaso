@@ -83,6 +83,7 @@ CAST_MAP = {
         "(default if not specified: "
         "`iaso-pipelines/import-submissions/<form_name>`)"
     ),
+    required=False,
 )
 @parameter(
     "strict_validation",
