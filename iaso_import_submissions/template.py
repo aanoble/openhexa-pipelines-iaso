@@ -25,7 +25,6 @@ def generate_xml_template(
     )
 
     template_parts = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
         '<data xmlns:jr="http://openrosa.org/javarosa" xmlns:orx="http://openrosa.org/xforms"',
         f'      id="{id_form}" version="{form_version}">',
         f"    <{begin_group}>" if begin_group else "",

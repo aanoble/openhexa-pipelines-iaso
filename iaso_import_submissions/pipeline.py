@@ -317,8 +317,8 @@ def handle_create_mode(
                 )
                 summary["ignored"] += 1
                 continue
-
-            xml_data = Template(xml_template).render(**record)
+            data = {**record, **{"uuid": the_uuid}}
+            xml_data = Template(xml_template).render(**data)
             with file_path.open("w", encoding="utf-8") as f:
                 f.write(xml_data)
 
