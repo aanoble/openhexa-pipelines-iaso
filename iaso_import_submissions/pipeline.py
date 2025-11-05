@@ -102,8 +102,8 @@ def iaso_import_submissions(
     form_id: int,
     input_file: File,
     import_strategy: str,
-    strict_validation: bool,
     output_directory: str,
+    strict_validation: bool,
 ):
     """Write your pipeline orchestration here."""
     current_run.log_info("Starting form submissions import pipeline")
@@ -116,7 +116,7 @@ def iaso_import_submissions(
         raise PermissionError("User does not have the required roles for this application.")
 
     # Import submissions file
-    df_submissions = read_submissions_file(input_file.path)
+    df_submissions = read_submissions_file(Path(workspace.files_path, input_file.path))
 
     # Get form metadata
     questions = get_form_metadata(iaso=iaso, form_id=form_id)
@@ -151,9 +151,9 @@ def iaso_import_submissions(
         form_name=form_name,
         form_id=form_id,
         app_id=app_id,
-        strict_validation=strict_validation,
         import_strategy=import_strategy,
         output_directory=output_directory,
+        strict_validation=strict_validation,
     )
 
 
@@ -267,7 +267,6 @@ def handle_create_mode(
     strict_validation: bool,
     output_directory: str | None,
     dico_xml_template: dict,
-    meta: dict,
 ) -> dict[str, int]:
     """Handle creation/import of new instances from the dataframe.
 
@@ -385,9 +384,9 @@ def push_submissions(
     form_name: str,
     form_id: int,
     app_id: str,
-    strict_validation: bool,
     import_strategy: str,
     output_directory: str | None,
+    strict_validation: bool,
 ) -> dict[str, int]:
     """Orchestrate pushing submissions to IASO by delegating to per-mode handlers.
 
