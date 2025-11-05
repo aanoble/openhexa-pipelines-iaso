@@ -77,7 +77,7 @@ CAST_MAP = {
 @parameter(
     "output_directory",
     type=str,  # type: ignore
-    name="Output directory for import summary",
+    name="Output directory",
     help=(
         "Directory where the import summary will be saved."
         "(default if not specified: "
@@ -101,7 +101,7 @@ def iaso_import_submissions(
     project: int,
     form_id: int,
     input_file: File,
-    import_mode: str,
+    import_strategy: str,
     strict_validation: bool,
     output_directory: str,
 ):
@@ -125,7 +125,7 @@ def iaso_import_submissions(
     validation_result = validate_data_structure(
         df_submissions,
         questions,
-        import_mode,
+        import_strategy,
     )
     if strict_validation and not validation_result["is_valid"]:
         error_messages = "\n".join(validation_result["errors"])
@@ -152,7 +152,7 @@ def iaso_import_submissions(
         form_id=form_id,
         app_id=app_id,
         strict_validation=strict_validation,
-        import_mode=import_mode,
+        import_strategy=import_strategy,
         output_directory=output_directory,
     )
 
@@ -386,7 +386,7 @@ def push_submissions(
     form_id: int,
     app_id: str,
     strict_validation: bool,
-    import_mode: str,
+    import_strategy: str,
     output_directory: str | None,
 ) -> dict[str, int]:
     """Orchestrate pushing submissions to IASO by delegating to per-mode handlers.
@@ -398,10 +398,10 @@ def push_submissions(
     """
     current_run.log_info(f"Pushing {len(df)} submissions to IASO for app ID {app_id} start")
 
-    mode = (import_mode or "CREATE").upper()
+    mode = (import_strategy or "CREATE").upper()
     if mode not in ("CREATE", "DELETE"):
         msg = (
-            f"Import mode '{import_mode}' is not implemented by this pipeline yet. "
+            f"Import mode '{import_strategy}' is not implemented by this pipeline yet. "
             "Only 'CREATE', 'DELETE' is supported at the moment."
         )
         current_run.log_warning(msg)
