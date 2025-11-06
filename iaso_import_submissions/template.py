@@ -1,3 +1,5 @@
+import xml.etree.ElementTree as ET
+
 import polars as pl
 
 
@@ -46,3 +48,59 @@ def generate_xml_template(
     )
 
     return "\n".join(template_parts)
+
+
+def _local_name(tag: str) -> str:
+    return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def inject_iaso_and_edituser_from_str(
+    xml_str: str,
+    iaso_numeric_id: int | None = None,
+    edit_user_id: int | None = None,
+) -> bytes:
+    """Inject or update IASO instance ID and edit user ID in XML string.
+
+    Args:
+        xml_str (str): The XML string to modify.
+        iaso_numeric_id (int | None, optional): IASO instance ID to inject. Defaults to None.
+        edit_user_id (int | None, optional): Edit user ID to inject. Defaults to None.
+
+    Returns:
+        bytes: Modified XML string with updated attributes.
+    """
+    # parser à partir de la string
+    root = ET.fromstring(xml_str)
+
+    # 1) ajouter / remplacer l'attribut iasoInstance sur la racine
+    if iaso_numeric_id is not None:
+        root.set("iasoInstance", str(iaso_numeric_id))
+
+    # 2) trouver (ou créer) l'élément <meta> (quel que soit le namespace)
+    meta = None
+    for elem in root.iter():
+        if _local_name(elem.tag).lower() == "meta":
+            meta = elem
+            break
+
+    if meta is None and edit_user_id is not None:
+        # créer meta en tant qu'enfant direct de la racine (sans namespace)
+        meta = ET.SubElement(root, "meta")
+
+    # 3) ajouter / remplacer editUserID dans meta
+    if edit_user_id is not None and meta is not None:
+        found = None
+        for ch in list(meta):
+            if _local_name(ch.tag).lower() == "edituserid":
+                found = ch
+                break
+        if found is None:
+            found = ET.SubElement(meta, "editUserID")
+        found.text = str(edit_user_id)
+
+    # 4) retourner la string XML (ElementTree renvoie str si encoding='unicode')
+    out = ET.tostring(root, encoding="utf-8")
+    # si vous voulez une déclaration XML en tête, la rajouter :
+    if not out.strip().startswith("<?xml"):
+        out = '<?xml version="1.0" encoding="utf-8"?>\n' + out
+    return out

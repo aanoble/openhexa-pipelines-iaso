@@ -1,3 +1,5 @@
+import base64
+import json
 from io import BytesIO
 
 import pandas as pd
@@ -280,3 +282,19 @@ def fetch_form_meta(iaso: IASO, form_id: int) -> dict:
     except Exception as exc:
         current_run.log_error(f"Failed to fetch form metadata for form {form_id}: {exc}")
         raise
+
+
+def get_user_id_from_jwt(token: str) -> str:
+    """Extract user ID from a JWT token.
+
+    Args:
+        token (str): JWT token string.
+
+    Returns:
+        str: User ID extracted from the token, or empty string if not found.
+    """
+    payload_b64 = token.split(".")[1]
+    payload_b64 += "=" * (-len(payload_b64) % 4)
+    payload = base64.urlsafe_b64decode(payload_b64)
+    payload = json.loads(payload)
+    return payload.get("user_id", "") or payload.get("id", "") or payload.get("sub", "")

@@ -54,20 +54,21 @@ def validate_data_structure(
             },
         },
         "UPDATE": {
-            "required": {"id", "org_unit_id"},
-            "optional": {"created_at", "form_version"},
+            "required": {"id", "instanceID"},
+            "optional": {"org_unit_id", "created_at", "form_version"},
             "types": {
                 "id": pl.Utf8,
                 "org_unit_id": pl.Int64,
+                "instanceID": pl.Utf8,
                 "created_at": (pl.Date, pl.Datetime, pl.Utf8),
             },
         },
         "CREATE_UPDATE": {
-            "required": {"org_unit_id", "created_at"},
-            "optional": {"id", "form_version"},
+            "required": {"org_unit_id"},
+            "optional": {"id", "form_version", "instanceID"},
             "types": {
                 "org_unit_id": pl.Int64,
-                "created_at": (pl.Date, pl.Datetime, pl.Utf8),
+                "instanceID": pl.Utf8,
                 "id": pl.Utf8,
             },
         },
