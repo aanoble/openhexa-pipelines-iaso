@@ -53,14 +53,14 @@ def generate_xml_template(
 
 def inject_iaso_and_edituser_from_str(
     xml_str: str,
-    iaso_numeric_id: int | None = None,
+    iaso_instance: int | None = None,
     edit_user_id: int | None = None,
 ) -> bytes:
     """Inject or update IASO instance ID and edit user ID in XML string.
 
     Args:
         xml_str (str): The XML string to modify.
-        iaso_numeric_id (int | None, optional): IASO instance ID to inject. Defaults to None.
+        iaso_instance (int | None, optional): IASO instance ID to inject. Defaults to None.
         edit_user_id (int | None, optional): Edit user ID to inject. Defaults to None.
 
     Returns:
@@ -68,8 +68,8 @@ def inject_iaso_and_edituser_from_str(
     """
     root = ET.fromstring(xml_str)
 
-    if iaso_numeric_id is not None:
-        root.set("iasoInstance", str(iaso_numeric_id))
+    if iaso_instance is not None:
+        root.set("iasoInstance", str(iaso_instance))
 
     meta = None
     for elem in root.iter():

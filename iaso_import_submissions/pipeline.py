@@ -507,7 +507,7 @@ def handle_update_mode(
             )
             xml_data = inject_iaso_and_edituser_from_str(
                 xml_data,
-                iaso_numeric_id=int(iaso_instance) if iaso_instance else None,
+                iaso_instance=int(iaso_instance) if iaso_instance else None,
                 edit_user_id=int(user_id) if user_id else None,
             )
 
@@ -564,12 +564,10 @@ def push_submissions(
     Returns:
         dict[str, int]: summary counts for imported/updated/ignored/deleted.
     """
-    mode = (import_strategy or "CREATE").upper()
-
     headers = get_token_headers(iaso)
     meta = fetch_form_meta(iaso, form_id)
 
-    if mode == "DELETE":
+    if import_strategy == "DELETE":
         current_run.log_info(
             f"Starting deletion of {len(df)} submissions in IASO for app ID {app_id}."
         )
@@ -579,7 +577,7 @@ def push_submissions(
         # Run global validation to ensure summary columns exist
         df = validate_global_data(df=df, questions=questions, choices=choices)
 
-    if mode == "CREATE":
+    if import_strategy == "CREATE":
         dico_xml_template = generate_templates_for_versions(
             iaso, df, form_id, meta, questions, choices
         )
@@ -598,7 +596,7 @@ def push_submissions(
         )
         current_run.log_info(f"Push finished. Summary: {summary}")
 
-    if mode == "UPDATE":
+    if import_strategy == "UPDATE":
         dico_xml_template = generate_templates_for_versions(
             iaso, df, form_id, meta, questions, choices
         )
@@ -616,7 +614,7 @@ def push_submissions(
         )
         current_run.log_info(f"Update finished. Summary: {summary}")
 
-    if mode == "CREATE_AND_UPDATE":
+    if import_strategy == "CREATE_AND_UPDATE":
         df_create = df.filter(pl.col("id").is_null() & pl.col("org_unit_id").is_not_null())
         df_update = df.filter(pl.col("id").is_not_null())
 
