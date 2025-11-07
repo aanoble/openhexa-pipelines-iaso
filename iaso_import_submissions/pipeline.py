@@ -484,7 +484,17 @@ def handle_update_mode(
 
             # Get iaso instance from xml instances
             res = iaso.api_client.get(f"/api/instances/{record.get('id')}/", headers=headers)
-            xml_file_url = res.json().get("file_url", "")
+            res_json = res.json()
+
+            is_locked = res_json.get("is_locked", False)
+            if is_locked:
+                current_run.log_warning(
+                    f"Instance id={record.get('id')} is locked, skipping update."
+                )
+                summary["ignored"] += 1
+                continue
+
+            xml_file_url = res_json.get("file_url", "")
             xml_bytes = requests.get(xml_file_url).content
             root = ET.fromstring(xml_bytes)
             iaso_instance = root.attrib.get("iasoInstance") or root.attrib.get("iaso_instance")
@@ -497,8 +507,8 @@ def handle_update_mode(
             )
             xml_data = inject_iaso_and_edituser_from_str(
                 xml_data,
-                iaso_numeric_id=int(iaso_instance),  # type: ignore
-                edit_user_id=int(user_id),
+                iaso_numeric_id=int(iaso_instance) if iaso_instance else None,
+                edit_user_id=int(user_id) if user_id else None,
             )
 
             with file_path.open("wb") as f:
@@ -643,6 +653,8 @@ def push_submissions(
             "ignored": summary_create["ignored"] + summary_update["ignored"],
             "deleted": 0,
         }
+
+        current_run.log_info(f"Create and Update finished. Summary: {summary}")
 
     return summary
 

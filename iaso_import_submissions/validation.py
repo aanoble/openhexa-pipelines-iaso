@@ -3,6 +3,7 @@ import re
 import polars as pl
 from openhexa.sdk import current_run
 from pydantic import BaseModel  # type: ignore
+from utils import calculate_to_polars_expr
 
 
 class ValidationResult(BaseModel):
@@ -134,34 +135,6 @@ def validate_data_structure(
     return result.__dict__
 
 
-def _validate_column_types(
-    df: pl.DataFrame, type_requirements: dict, import_strategy: str
-) -> dict[str, tuple[str, str]]:
-    """Validates column types with flexibility."""  # noqa: DOC201
-    invalid_types = {}
-    schema = df.schema
-
-    if import_strategy == "DELETE":
-        type_requirements = {"id": pl.Utf8}
-
-    for column, expected_type in type_requirements.items():
-        if column not in schema:
-            continue
-
-        actual_type = schema[column]
-
-        # Handle cases where expected_type is a tuple of types
-        if isinstance(expected_type, tuple):
-            if actual_type not in expected_type:
-                expected_str = " or ".join(str(t) for t in expected_type)
-                invalid_types[column] = (expected_str, str(actual_type))
-        else:
-            if actual_type != expected_type:
-                invalid_types[column] = (str(expected_type), str(actual_type))
-
-    return invalid_types
-
-
 def validate_global_data(
     df: pl.DataFrame, questions: pl.DataFrame, choices: pl.DataFrame
 ) -> pl.DataFrame:
@@ -185,7 +158,7 @@ def validate_global_data(
         if not calculation or col_name in df.columns:
             continue
 
-        expr_str = _calculate_to_polars_expr(calculation)
+        expr_str = calculate_to_polars_expr(calculation)
         try:
             # expr_str is expected to be a Polars expression string using `pl` namespace
             expr = eval(expr_str, {"pl": pl})
@@ -284,29 +257,6 @@ def validate_global_data(
     return df
 
 
-def _calculate_to_polars_expr(calc_str: str) -> str:
-    expr = calc_str.strip()
-
-    if expr in ("0", "0.0"):
-        return "pl.lit(0)"
-
-    expr = re.sub(r"\$\{([^}]+)\}", r'pl.col("\1")', expr)
-
-    expr = expr.replace(" div ", " / ")
-
-    expr = re.sub(r"round\((.+?),\s*0\)", r"(\1).round()", expr)
-
-    expr = re.sub(r"round\((.+?)\)", r"(\1).round()", expr)
-
-    expr = re.sub(r"abs\((.+?)\)", r"(\1).abs()", expr)
-
-    def repl_coalesce(match: re.Match) -> str:
-        args = match.group(1)
-        return f"pl.coalesce([{args}])"
-
-    return re.sub(r"coalesce\((.+?)\)", repl_coalesce, expr)
-
-
 def validate_field_constraints(
     record: dict, questions: pl.DataFrame, choices: pl.DataFrame
 ) -> bool:
@@ -363,3 +313,31 @@ def _validate_value(value: str, constraints: str) -> bool:
     else:
         # not yet implemented
         return True
+
+
+def _validate_column_types(
+    df: pl.DataFrame, type_requirements: dict, import_strategy: str
+) -> dict[str, tuple[str, str]]:
+    """Validates column types with flexibility."""  # noqa: DOC201
+    invalid_types = {}
+    schema = df.schema
+
+    if import_strategy == "DELETE":
+        type_requirements = {"id": pl.Utf8}
+
+    for column, expected_type in type_requirements.items():
+        if column not in schema:
+            continue
+
+        actual_type = schema[column]
+
+        # Handle cases where expected_type is a tuple of types
+        if isinstance(expected_type, tuple):
+            if actual_type not in expected_type:
+                expected_str = " or ".join(str(t) for t in expected_type)
+                invalid_types[column] = (expected_str, str(actual_type))
+        else:
+            if actual_type != expected_type:
+                invalid_types[column] = (str(expected_type), str(actual_type))
+
+    return invalid_types
