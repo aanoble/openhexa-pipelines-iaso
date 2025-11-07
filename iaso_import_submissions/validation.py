@@ -64,7 +64,7 @@ def validate_data_structure(
                 "created_at": (pl.Date, pl.Datetime, pl.Utf8),
             },
         },
-        "CREATE_UPDATE": {
+        "CREATE_AND_UPDATE": {
             "required": {"org_unit_id"},
             "optional": {"id", "form_version", "instanceID"},
             "types": {
