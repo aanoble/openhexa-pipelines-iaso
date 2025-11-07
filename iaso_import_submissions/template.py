@@ -66,7 +66,7 @@ def inject_iaso_and_edituser_from_str(
     Returns:
         bytes: Modified XML string with updated attributes.
     """
-    root = ET.fromstring(xml_str)
+    root = ET.fromstring(bytes(xml_str, encoding="utf-8"))
 
     if iaso_instance is not None:
         root.set("iasoInstance", str(iaso_instance))

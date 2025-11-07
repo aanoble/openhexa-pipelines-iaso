@@ -170,26 +170,23 @@ def generate_templates_for_versions(
     questions: pl.DataFrame,
     choices: pl.DataFrame,
 ) -> dict:
-    """Prepare XML templates per form version present in the submissions dataframe.
+    """Generate XML templates keyed by form version.
 
-    If the dataframe does not contain a `form_version` column, run global
-    validation to compute any required summary columns before generating the
-    template for the latest version.
+    If no `form_version` column exists, only a `latest_version` template is created
+    using the latest version id from metadata. Otherwise, each distinct version
+    in the dataframe gets its own template generated with version-specific questions.
 
     Returns:
-        dict: mapping version -> xml_template (may contain 'latest_version').
+        dict: {version_or_latest: xml_template_string}
     """
-    dico_xml_template: dict = {}
+    templates: dict = {}
 
     if "form_version" not in df.columns:
-        # Create a template for the latest form version exposed by IASO
         latest_version = meta.get("latest_form_version") or {}
-        if isinstance(latest_version, dict):
-            latest_version_id = str(latest_version.get("version_id", ""))
-        else:
-            latest_version_id = ""
-
-        dico_xml_template["latest_version"] = generate_xml_template(
+        latest_version_id = (
+            str(latest_version.get("version_id", "")) if isinstance(latest_version, dict) else ""
+        )
+        templates["latest_version"] = generate_xml_template(
             df=df,
             questions=questions,
             id_form=str(meta.get("form_id") or ""),
@@ -200,14 +197,64 @@ def generate_templates_for_versions(
             questions_for_version = get_form_metadata(
                 iaso=iaso, form_id=form_id, form_version=version
             )
-            dico_xml_template[version] = generate_xml_template(
+            templates[version] = generate_xml_template(
                 df=df,
                 questions=questions_for_version,
                 id_form=str(meta.get("form_id") or ""),
                 form_version=version,
             )
 
-    return dico_xml_template
+    return templates
+
+
+def _select_template_and_is_valid(
+    record: dict,
+    df: pl.DataFrame,
+    strict_validation: bool,
+    questions: pl.DataFrame,
+    choices: pl.DataFrame,
+    templates: dict,
+) -> tuple[bool, str | None]:
+    """Return (is_valid, xml_template) for a record.
+
+    - If a 'latest_version' template exists, prefer it and use global summary columns
+      when present to determine validity.
+    - Otherwise, validate the record against field constraints and select the
+      template matching the record's form_version.
+
+    If strict_validation is False, records are considered valid regardless of
+    validation results.
+
+    Returns:
+        tuple[bool, str | None]:
+            - is_valid: whether the record passes validation (or strict_validation is disabled)
+            - xml_template: the XML template string to use for rendering this record, or None
+    """
+    if "latest_version" in templates:
+        constraints_present = "constraints_validation_summary" in df.columns
+        choices_present = "choices_validation_summary" in df.columns
+
+        if constraints_present and choices_present:
+            is_valid = bool(record.get("constraints_validation_summary")) and bool(
+                record.get("choices_validation_summary")
+            )
+        elif constraints_present:
+            is_valid = bool(record.get("constraints_validation_summary"))
+        elif choices_present:
+            is_valid = bool(record.get("choices_validation_summary"))
+        else:
+            is_valid = True
+
+        xml_template = templates["latest_version"]
+    else:
+        is_valid = validate_field_constraints(record, questions, choices)
+        xml_template = templates.get(record.get("form_version"))
+
+    # If strict validation is disabled, accept the record regardless
+    if not strict_validation:
+        is_valid = True
+
+    return is_valid, xml_template
 
 
 def handle_delete_mode(iaso: IASO, df: pl.DataFrame, headers: dict) -> dict[str, int]:
@@ -269,7 +316,7 @@ def handle_create_mode(
     app_id: str,
     strict_validation: bool,
     output_directory: str | None,
-    dico_xml_template: dict,
+    templates: dict,
 ) -> dict[str, int]:
     """Handle creation/import of new instances from the dataframe.
 
@@ -286,28 +333,14 @@ def handle_create_mode(
 
     for record in df.iter_rows(named=True):
         try:
-            # Choose template and determine validity
-            if "latest_version" in dico_xml_template:
-                constraints_present = "constraints_validation_summary" in df.columns
-                choices_present = "choices_validation_summary" in df.columns
-
-                if constraints_present and choices_present:
-                    is_valid = bool(record.get("constraints_validation_summary")) and bool(
-                        record.get("choices_validation_summary")
-                    )
-                elif constraints_present:
-                    is_valid = bool(record.get("constraints_validation_summary"))
-                elif choices_present:
-                    is_valid = bool(record.get("choices_validation_summary"))
-                else:
-                    is_valid = True
-
-                xml_template = dico_xml_template["latest_version"]
-            else:
-                is_valid = validate_field_constraints(record, questions, choices)
-                xml_template = dico_xml_template.get(record.get("form_version"))
-
-            is_valid = is_valid or not strict_validation
+            is_valid, xml_template = _select_template_and_is_valid(
+                record=record,
+                df=df,
+                strict_validation=strict_validation,
+                questions=questions,
+                choices=choices,
+                templates=templates,
+            )
             if not is_valid:
                 summary["ignored"] += 1
                 continue
@@ -322,6 +355,7 @@ def handle_create_mode(
                 )
                 summary["ignored"] += 1
                 continue
+
             data = {**record, **{"uuid": the_uuid}}
             xml_data = Template(xml_template).render(
                 **{k: v if v is not None else "" for k, v in data.items()}
@@ -389,7 +423,7 @@ def handle_update_mode(
     form_id: int,
     strict_validation: bool,
     output_directory: str | None,
-    dico_xml_template: dict,
+    templates: dict,
 ) -> dict[str, int]:
     """Handle update of existing instances from the dataframe.
 
@@ -416,35 +450,22 @@ def handle_update_mode(
     user_id = get_user_id_from_jwt(token)
     for record in df.iter_rows(named=True):
         try:
-            # Choose template and determine validity
-            if "latest_version" in dico_xml_template:
-                constraints_present = "constraints_validation_summary" in df.columns
-                choices_present = "choices_validation_summary" in df.columns
-
-                if constraints_present and choices_present:
-                    is_valid = bool(record.get("constraints_validation_summary")) and bool(
-                        record.get("choices_validation_summary")
-                    )
-                elif constraints_present:
-                    is_valid = bool(record.get("constraints_validation_summary"))
-                elif choices_present:
-                    is_valid = bool(record.get("choices_validation_summary"))
-                else:
-                    is_valid = True
-
-                xml_template = dico_xml_template["latest_version"]
-            else:
-                is_valid = validate_field_constraints(record, questions, choices)
-                xml_template = dico_xml_template.get(record.get("form_version"))
-
-            is_valid = is_valid or not strict_validation
+            is_valid, xml_template = _select_template_and_is_valid(
+                record=record,
+                df=df,
+                strict_validation=strict_validation,
+                questions=questions,
+                choices=choices,
+                templates=templates,
+            )
             if not is_valid:
                 summary["ignored"] += 1
                 continue
 
+            instance_uuid_raw = record.get("instanceID")
             instance_uuid = (
-                record.get("instanceID").removeprefix("uuid:")[-1]  # type: ignore
-                if record.get("instanceID") and "instanceID" in record
+                instance_uuid_raw.removeprefix("uuid:")
+                if isinstance(instance_uuid_raw, str)
                 else None
             )
 
@@ -506,7 +527,7 @@ def handle_update_mode(
                 **{k: v if v is not None else "" for k, v in data.items()}
             )
             xml_data = inject_iaso_and_edituser_from_str(
-                xml_data,
+                xml_str=xml_data,
                 iaso_instance=int(iaso_instance) if iaso_instance else None,
                 edit_user_id=int(user_id) if user_id else None,
             )
@@ -578,9 +599,7 @@ def push_submissions(
         df = validate_global_data(df=df, questions=questions, choices=choices)
 
     if import_strategy == "CREATE":
-        dico_xml_template = generate_templates_for_versions(
-            iaso, df, form_id, meta, questions, choices
-        )
+        templates = generate_templates_for_versions(iaso, df, form_id, meta, questions, choices)
         current_run.log_info(f"Pushing {len(df)} submissions to IASO for app ID {app_id} start")
         summary = handle_create_mode(
             iaso=iaso,
@@ -592,14 +611,12 @@ def push_submissions(
             app_id=app_id,
             strict_validation=strict_validation,
             output_directory=output_directory,
-            dico_xml_template=dico_xml_template,
+            templates=templates,
         )
         current_run.log_info(f"Push finished. Summary: {summary}")
 
     if import_strategy == "UPDATE":
-        dico_xml_template = generate_templates_for_versions(
-            iaso, df, form_id, meta, questions, choices
-        )
+        templates = generate_templates_for_versions(iaso, df, form_id, meta, questions, choices)
         current_run.log_info(f"Updating {len(df)} submissions in IASO for app ID {app_id} start")
         summary = handle_update_mode(
             iaso=iaso,
@@ -610,7 +627,7 @@ def push_submissions(
             form_id=form_id,
             strict_validation=strict_validation,
             output_directory=output_directory,
-            dico_xml_template=dico_xml_template,
+            templates=templates,
         )
         current_run.log_info(f"Update finished. Summary: {summary}")
 
@@ -628,7 +645,7 @@ def push_submissions(
             app_id=app_id,
             strict_validation=strict_validation,
             output_directory=output_directory,
-            dico_xml_template=generate_templates_for_versions(
+            templates=generate_templates_for_versions(
                 iaso, df_create, form_id, meta, questions, choices
             ),
         )
@@ -641,7 +658,7 @@ def push_submissions(
             form_id=form_id,
             strict_validation=strict_validation,
             output_directory=output_directory,
-            dico_xml_template=generate_templates_for_versions(
+            templates=generate_templates_for_versions(
                 iaso, df_update, form_id, meta, questions, choices
             ),
         )
