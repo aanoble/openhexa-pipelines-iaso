@@ -546,7 +546,7 @@ def handle_update_mode(
             with file_path.open("rb") as fp:
                 files = {"xml_submission_file": (file_path.name, fp, "application/xml")}
                 upload_res = requests.post(
-                    f"{edit_url.scheme}://{edit_url.netloc}/{edit_url.path.split('/')[-1]}",
+                    f"{edit_url.scheme}://{edit_url.netloc}/submission/{edit_url.path.split('/')[-1]}",
                     headers=headers,
                     files=files,
                 )
