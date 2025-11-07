@@ -92,6 +92,7 @@ def inject_iaso_and_edituser_from_str(
 
     out = ET.tostring(root, encoding="utf-8")
 
-    if not out.strip().startswith("<?xml"):
-        out = '<?xml version="1.0" encoding="utf-8"?>\n' + out
+    # Ensure we compare bytes with bytes and prepend a bytes XML declaration when missing
+    if not out.lstrip().startswith(b"<?xml"):
+        out = b'<?xml version="1.0" encoding="utf-8"?>\n' + out
     return out
