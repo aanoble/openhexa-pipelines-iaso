@@ -90,4 +90,22 @@ def inject_iaso_and_edituser_from_str(
             found = ET.SubElement(meta, "editUserID")
         found.text = str(edit_user_id)
 
-    return ET.tostring(root, encoding="utf-8")
+    out = ET.tostring(root, encoding="utf-8")
+
+    # ElementTree may drop unused namespace declarations on serialization.
+    # Ensure the standard OpenRosa namespaces are present on the <data> root.
+    missing = []
+    if b"xmlns:jr=" not in out:
+        missing.append(b'xmlns:jr="http://openrosa.org/javarosa"')
+    if b"xmlns:orx=" not in out:
+        missing.append(b'xmlns:orx="http://openrosa.org/xforms"')
+
+    if missing:
+        insertion = b" " + b" ".join(missing)
+        out = out.replace(b"<data", b"<data" + insertion, 1)
+
+    # Prepend XML declaration if it's missing
+    if not out.lstrip().startswith(b"<?xml"):
+        out = b'<?xml version="1.0" encoding="utf-8"?>\n' + out
+
+    return out
