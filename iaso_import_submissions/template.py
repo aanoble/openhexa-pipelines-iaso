@@ -51,20 +51,20 @@ def generate_xml_template(
     return "\n".join(template_parts)
 
 
-def inject_iaso_and_edituser_from_str(
+def enrich_submission_xml(
     xml_str: str,
     iaso_instance: int | None = None,
     edit_user_id: int | None = None,
 ) -> bytes:
-    """Inject or update IASO instance ID and edit user ID in XML string.
+    """Enrich an IASO submission XML string with instance/user metadata.
 
     Args:
-        xml_str (str): The XML string to modify.
-        iaso_instance (int | None, optional): IASO instance ID to inject. Defaults to None.
-        edit_user_id (int | None, optional): Edit user ID to inject. Defaults to None.
+    xml_str (str): Original XML template content.
+    iaso_instance (int | None): IASO instance numeric ID to embed (added as attribute).
+    edit_user_id (int | None): User ID performing edit; added/updated under <meta><editUserID>.
 
     Returns:
-        bytes: Modified XML string with updated attributes.
+    bytes: Updated XML including namespace safeguards and optional metadata elements.
     """
     root = ET.fromstring(bytes(xml_str, encoding="utf-8"))
 

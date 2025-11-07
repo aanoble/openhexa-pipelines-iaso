@@ -29,7 +29,7 @@ from openhexa.sdk import (
 )
 from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO
-from template import generate_xml_template, inject_iaso_and_edituser_from_str
+from template import enrich_submission_xml, generate_xml_template
 from validation import validate_data_structure, validate_field_constraints, validate_global_data
 
 CAST_MAP = {
@@ -503,7 +503,11 @@ def handle_update_mode(
                 continue
 
             # Get iaso instance from xml instances
-            res = iaso.api_client.get(f"/api/instances/{record.get('id')}/", headers=headers)
+            res = iaso.api_client.get(
+                f"/api/instances/{record.get('id')}/",
+                headers=headers,
+                params={"fields": "is_locked"},
+            )
             res_json = res.json()
 
             is_locked = res_json.get("is_locked", False)
@@ -514,11 +518,6 @@ def handle_update_mode(
                 summary["ignored"] += 1
                 continue
 
-            # xml_file_url = res_json.get("file_url", "")
-            # xml_bytes = requests.get(xml_file_url).content
-            # root = ET.fromstring(xml_bytes)
-            # iaso_instance = root.attrib.get("iasoInstance") or root.attrib.get("iaso_instance")
-
             the_uuid = str(instance_uuid)
             file_path = output_dir / f"update_{the_uuid}.xml"
             data = {**record, **{"uuid": the_uuid}}
@@ -526,7 +525,7 @@ def handle_update_mode(
                 **{k: v if v is not None else "" for k, v in data.items()}
             )
             current_run.log_debug(xml_data)
-            xml_data = inject_iaso_and_edituser_from_str(
+            xml_data = enrich_submission_xml(
                 xml_str=xml_data,
                 iaso_instance=int(record.get("id")),  # type: ignore
                 edit_user_id=int(user_id) if user_id else None,
@@ -554,8 +553,8 @@ def handle_update_mode(
                 summary["updated"] += 1
             else:
                 current_run.log_error(
-                    "Update failed for "
-                    f"{file_path.name}: status={upload_res.status_code} "
+                    "Update failed for id"
+                    f"{record.get('id', '')}: status={upload_res.status_code} "
                     f"resp={getattr(upload_res, 'text', None)}"
                 )
                 summary["ignored"] += 1
