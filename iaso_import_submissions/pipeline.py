@@ -525,11 +525,13 @@ def handle_update_mode(
             xml_data = Template(xml_template).render(
                 **{k: v if v is not None else "" for k, v in data.items()}
             )
+            current_run.log_debug(xml_data)
             xml_data = inject_iaso_and_edituser_from_str(
                 xml_str=xml_data,
                 iaso_instance=int(record.get("id")),  # type: ignore
                 edit_user_id=int(user_id) if user_id else None,
             )
+            current_run.log_debug(xml_data.decode("utf-8"))
 
             with file_path.open("wb") as f:
                 f.write(xml_data)
