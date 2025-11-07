@@ -90,9 +90,4 @@ def inject_iaso_and_edituser_from_str(
             found = ET.SubElement(meta, "editUserID")
         found.text = str(edit_user_id)
 
-    out = ET.tostring(root, encoding="utf-8")
-
-    # Ensure we compare bytes with bytes and prepend a bytes XML declaration when missing
-    if not out.lstrip().startswith(b"<?xml"):
-        out = b'<?xml version="1.0" encoding="utf-8"?>\n' + out
-    return out
+    return ET.tostring(root, encoding="utf-8")

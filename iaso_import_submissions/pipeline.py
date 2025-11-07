@@ -1,7 +1,6 @@
 """Template for newly generated pipelines."""
 
 import uuid
-import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -515,10 +514,10 @@ def handle_update_mode(
                 summary["ignored"] += 1
                 continue
 
-            xml_file_url = res_json.get("file_url", "")
-            xml_bytes = requests.get(xml_file_url).content
-            root = ET.fromstring(xml_bytes)
-            iaso_instance = root.attrib.get("iasoInstance") or root.attrib.get("iaso_instance")
+            # xml_file_url = res_json.get("file_url", "")
+            # xml_bytes = requests.get(xml_file_url).content
+            # root = ET.fromstring(xml_bytes)
+            # iaso_instance = root.attrib.get("iasoInstance") or root.attrib.get("iaso_instance")
 
             the_uuid = str(instance_uuid)
             file_path = output_dir / f"update_{the_uuid}.xml"
@@ -528,7 +527,7 @@ def handle_update_mode(
             )
             xml_data = inject_iaso_and_edituser_from_str(
                 xml_str=xml_data,
-                iaso_instance=int(iaso_instance) if iaso_instance else None,
+                iaso_instance=int(record.get("id")),  # type: ignore
                 edit_user_id=int(user_id) if user_id else None,
             )
 
