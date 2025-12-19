@@ -11,8 +11,6 @@ This OpenHEXA pipeline (`iaso_import_submissions`) imports, updates and deletes 
 The pipeline builds OpenRosa-compliant XML payloads, enriches them with instance/user metadata, and uploads them through IASO's `/api/instances` and `/sync/form_upload/` / Enketo edit endpoints.
 
 ## Example Usage
-(Interface illustration placeholder)
-
 1. Select an IASO connection, project and form.
 2. Upload a submissions file exported from another system or prepared manually.
 3. Choose an import strategy (default: CREATE).
@@ -66,7 +64,9 @@ Ignored rows arise from failed validation, missing required columns, API failure
 ## Data Structure & Validation
 Validation steps (when `strict_validation=True`):
 1. Schema/type enforcement (casts attempted where possible).
-2. Constraint & choices summaries (global if no `form_version`, otherwise per-row via helper).
+2. Constraint & choices summaries
+  - If the submissions file **does not** include a `form_version` **column**: a single, global constraint set is used.
+  - If the submissions file **does** include a `form_version` **column**: constraints are determined **per row**, based on the row’s `form_version` value (via form questions).
 3. Row-level field constraint validation (during template selection).
 4. Rows failing validation contribute to `ignored`.
 
@@ -81,8 +81,8 @@ flowchart TD
     C --> D[Fetch form questions & choices]
     D --> E[Validate data structure]
     E --> F{Import Strategy}
-    F -->|CREATE| G[Generate template(s) & create instances]
-    F -->|UPDATE| H[Generate template(s) & update instances]
+    F -->|CREATE| G[Generate template & create instances]
+    F -->|UPDATE| H[Generate template & update instances]
     F -->|CREATE_AND_UPDATE| I[Split rows -> create & update]
     F -->|DELETE| J[Delete instances]
     G --> K[Upload XML / form_upload]
@@ -92,68 +92,23 @@ flowchart TD
     J --> L
 ```
 
-## Enrichment & Upload Mechanics
-- Instance metadata posted via `/api/instances` (create). Update mode optionally PATCHes location/org unit first.
-- XML submission uploaded:
-  - Creation: `/sync/form_upload/` (multipart, `xml_submission_file`)
-  - Update: Enketo edit endpoint `api/enketo/edit/{instance_uuid}` -> POST to returned `/submission/{token}` URL.
-- XML templates built from `questions` (filtered by included columns) and enriched with:
-  - `<meta><instanceID>uuid:...` inserted during templating.
-  - `iasoInstance` attribute and `<editUserID>` element inserted by `enrich_submission_xml`.
-
 ## Examples
-### Minimal CREATE file (CSV)
-```csv
-org_unit_id,latitude,longitude,field_a,field_b
-123,4.4,4.5,valueA1,valueB1
-456,6.0,6.2,valueA2,valueB2
-```
+### Minimal CREATE file
+| org_unit_id | latitude | longitude | field_a | field_b |
+|-------------|----------|-----------|---------|---------|
+| 123 | 4.4 | 4.5 | valueA1 | valueB1 |
+| 456 | 6.0 | 6.2 | valueA2 | valueB2 |
 
-### Minimal UPDATE file (CSV)
-```csv
-id,instanceID,org_unit_id,field_a
-987,"uuid:4b7c3954-f69a-4b99-83b1-db73957b32d2",123,newValue
-```
+### Minimal UPDATE file
+| id | instanceID | org_unit_id | field_a |
+|----|------------|-------------|---------|
+| 987 | 473957 | 123 | newValue |
 
 ## Troubleshooting
 | Issue | Cause | Resolution |
 |-------|-------|------------|
-| Many rows ignored | Missing required columns or validation failures | Enable debug logging; ensure `org_unit_id`, `id`, `instanceID` present as needed |
+| Many rows ignored | Missing required columns or validation failures | Enable |debug logging; ensure `org_unit_id`, `id`, `instanceID` present as needed |
 | Update skipped (locked) | Instance flagged `is_locked` in IASO | Unlock instance in IASO or omit from update batch |
 | XML upload fails (status ≠ 201) | Invalid XML or server error | Inspect generated XML file; validate namespaces & instanceID |
 | Missing namespaces in edited XML | ElementTree stripped unused prefixes | Function re-injects `xmlns:jr` & `xmlns:orx` automatically |
 | Wrong UUID in update | `instanceID` missing `uuid:` prefix | Prefix handled; ensure raw value present |
-
-## Performance Considerations
-- Processes row-by-row; for very large batches you may consider chunking the input file.
-- Reuses token headers; avoids repeated authentication.
-- Version-specific template caching prevents rebuilding for each row.
-
-## Extensibility
-Potential enhancements:
-- Retry/backoff on transient HTTP failures.
-- Batched `/api/instances` posts for updates (currently per-row).
-- Structured JSON summary artifact saved to output directory.
-- Additional validation for geospatial fields (range checks).
-
-## Related Files
-| File | Purpose |
-|------|---------|
-| `pipeline.py` | Main orchestration & strategy routing |
-| `template.py` | XML templating & enrichment logic (`enrich_submission_xml`) |
-| `validation.py` | Data structure & field-level validation functions |
-| `docs/FORM_SUBMISSION.md` | Reference for IASO form upload endpoint |
-| `iaso_client.py` | IASO API helpers (auth, metadata fetch) |
-
-## Requirements
-See `requirements.txt` for runtime dependencies
-
-## License
-This pipeline follows the repository's overall licensing terms (see root `LICENSE`).
-
-## Notes
-- Strict validation is optional; disable for rapid prototyping.
-- Ensure project-form alignment: form must belong to the specified project/app.
-- Delete operations are irreversible; consider backing up before large deletions.
-
----

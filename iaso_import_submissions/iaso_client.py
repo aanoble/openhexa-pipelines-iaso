@@ -1,5 +1,6 @@
 import base64
 import json
+from functools import lru_cache
 from io import BytesIO
 
 import pandas as pd
@@ -19,14 +20,9 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
     Returns:
         IASO: An authenticated IASO object.
     """
-    try:
-        iaso = IASO(conn.url, conn.username, conn.password)
-        current_run.log_info("IASO authentication successful")
-        return iaso
-    except Exception as exc:
-        error_msg = f"IASO authentication failed: {exc}"
-        current_run.log_error(error_msg)
-        raise RuntimeError(error_msg) from exc
+    iaso = IASO(conn.url, conn.username, conn.password)
+    current_run.log_info("IASO authentication successful")
+    return iaso
 
 
 def get_form_name(iaso: IASO, form_id: int) -> str:
@@ -45,9 +41,9 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
     try:
         response = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": {"name"}})
         return clean_string(response.json().get("name"))
-    except Exception as e:
+    except requests.RequestException as e:
         current_run.log_error(f"Form fetch failed: {e}")
-        raise ValueError("Invalid form ID") from e
+        raise
 
 
 def get_app_id(iaso: IASO, project_id: int) -> str:
@@ -63,36 +59,28 @@ def get_app_id(iaso: IASO, project_id: int) -> str:
     Raises:
         ValueError: If the project does not exist.
     """
-    if not hasattr(get_app_id, "_cache"):
-        get_app_id._cache = {}
-
-    if project_id in get_app_id._cache:
-        return get_app_id._cache[project_id]
-
     try:
         resp = iaso.api_client.get(
             f"/api/projects/{project_id}",
             params={"fields": {"app_id"}},
         )
-    except Exception as e:
-        current_run.log_error(f"Project fetch failed (network): {e}")
-        raise RuntimeError("Failed to fetch project from IASO API") from e
-
-    try:
         data = resp.json()
-    except Exception as e:
+    except requests.RequestException as e:
+        current_run.log_error(f"Project fetch failed (network): {e}")
+        raise
+    except json.JSONDecodeError as e:
         current_run.log_error(f"Invalid JSON in project response: {e}")
-        raise RuntimeError("Invalid JSON in project response") from e
+        raise
 
     app_id = data.get("app_id")
     if not app_id:
         current_run.log_error(f"Project {project_id} has no app_id in response: {data}")
-        raise ValueError("Invalid project ID or missing app_id")
+        raise ValueError(f"Project {project_id} has no app_id")
 
-    get_app_id._cache[project_id] = app_id
     return app_id
 
 
+@lru_cache(maxsize=10)
 def get_form_metadata(
     iaso: IASO, form_id: int, form_version: str | None = None, type_metadata: str = "questions"
 ) -> pl.DataFrame:
@@ -107,17 +95,7 @@ def get_form_metadata(
     Returns:
         pl.DataFrame: DataFrame containing form metadata.
     """
-    # simple in-memory cache to avoid repeated downloads in the same process
-    if not hasattr(get_form_metadata, "_cache"):
-        get_form_metadata._cache = {}
-
-    cache_key = (form_id, form_version or "latest", type_metadata)
-    cached = get_form_metadata._cache.get(cache_key)
-    if cached is not None:
-        return cached
-
     try:
-        # retrieve xls url (same logic but clearer variable names)
         if form_version:
             params = {
                 "form_id": str(form_id),
@@ -132,47 +110,43 @@ def get_form_metadata(
                 f"/api/forms/{form_id}", params={"fields": "latest_form_version"}
             )
             xls_url = res.json().get("latest_form_version", {}).get("xls_file", "")
+    except requests.RequestException as e:
+        current_run.log_error(f"Form metadata fetch failed (network): {e}")
+        raise
+    except json.JSONDecodeError as e:
+        current_run.log_error(f"Invalid JSON in form metadata response: {e}")
+        raise
 
-        if not xls_url:
-            return pl.DataFrame()
+    if not xls_url:
+        return pl.DataFrame()
 
-        # validate requested metadata type
-        if type_metadata not in ("questions", "choices"):
-            raise ValueError("type_metadata must be 'questions' or 'choices'")
+    if type_metadata not in ("questions", "choices"):
+        raise ValueError("type_metadata must be 'questions' or 'choices'")
 
-        # Download the XLS into memory once, then let pandas read from BytesIO.
-        try:
-            resp = requests.get(xls_url, timeout=30)
-            resp.raise_for_status()
-            bio = BytesIO(resp.content)
-        except Exception as ex:
-            current_run.log_error(f"Failed to download xls from {xls_url}: {ex}")
-            raise
-
-        # Read only the required sheet. If sheet is None, let pandas read the first sheet
-        sheet = "choices" if type_metadata == "choices" else None
-        if sheet is None:
-            df_pd = pd.read_excel(bio, dtype=str)
-        else:
-            df_pd = pd.read_excel(bio, sheet_name=sheet, dtype=str)
+    try:
+        resp = requests.get(xls_url, timeout=30)
+        resp.raise_for_status()
+        bio = BytesIO(resp.content)
+        df_pd = (
+            pd.read_excel(bio, dtype=str)
+            if type_metadata == "questions"
+            else pd.read_excel(bio, sheet_name="choices", dtype=str)
+        )
         df_pd = df_pd.dropna(how="all")
-
-        # convert to polars
         df_pl = pl.from_pandas(df_pd)
-        # strip leading/trailing whitespace for all Utf8 columns using schema inspection
+
         str_cols = [name for name, dtype in df_pl.schema.items() if dtype == pl.Utf8]
         if str_cols:
             df_pl = df_pl.with_columns(
                 [pl.col(c).str.replace_all(r"(^\s+)|(\s+$)", "") for c in str_cols]
             )
-
-        # cache result and return
-        get_form_metadata._cache[cache_key] = df_pl
         return df_pl
-
-    except Exception as e:
-        current_run.log_error(f"Form metadata fetch failed: {e}")
-        raise RuntimeError("Failed to fetch form metadata") from e
+    except requests.RequestException as ex:
+        current_run.log_error(f"Failed to download xls from {xls_url}: {ex}")
+        raise
+    except Exception as ex:
+        current_run.log_error(f"Failed to process xls file from {xls_url}: {ex}")
+        raise
 
 
 def validate_user_roles(iaso: IASO, app_id: str) -> bool:
@@ -187,15 +161,10 @@ def validate_user_roles(iaso: IASO, app_id: str) -> bool:
     """
     try:
         resp = iaso.api_client.get("/api/profiles/me/")
-    except Exception as e:
-        current_run.log_error(f"Failed to fetch profile from IASO API: {e}")
-        raise RuntimeError("Failed to fetch profile from IASO API") from e
-
-    try:
         res = resp.json()
-    except Exception as e:
-        current_run.log_error(f"Invalid JSON in IASO profile response: {e}")
-        raise RuntimeError("Invalid JSON in IASO profile response") from e
+    except requests.RequestException as e:
+        current_run.log_error(f"Failed to fetch profile from IASO API: {e}")
+        raise
 
     # Normalize permissions: they can be a list or a dict-like structure.
     def _to_perm_set(obj: object) -> set[str]:
@@ -217,7 +186,6 @@ def validate_user_roles(iaso: IASO, app_id: str) -> bool:
     if isinstance(user_account, dict):
         has_account = user_account.get("name") == app_id
     elif isinstance(user_account, (list, tuple)):
-        # list of accounts
         try:
             has_account = any(
                 (acc or {}).get("name") == app_id for acc in user_account if isinstance(acc, dict)
@@ -225,7 +193,6 @@ def validate_user_roles(iaso: IASO, app_id: str) -> bool:
         except Exception:
             has_account = False
     else:
-        # unexpected type - be conservative
         has_account = False
 
     result = bool(has_form_permissions and has_account)
@@ -246,21 +213,25 @@ def get_token_headers(iaso: IASO) -> dict[str, str]:
     Returns:
         dict[str, str]: Authorization header mapping.
     """
-    token_res = iaso.api_client.post(
-        "/api/token/",
-        json={"username": iaso.api_client.username, "password": iaso.api_client.password},
-    )
     try:
+        token_res = iaso.api_client.post(
+            "/api/token/",
+            json={"username": iaso.api_client.username, "password": iaso.api_client.password},
+        )
         token_res.raise_for_status()
         token = token_res.json().get("access")
-    except Exception as exc:
-        msg = f"Failed to obtain access token: {exc} - response: {getattr(token_res, 'text', None)}"
+    except requests.RequestException as exc:
+        msg = f"Failed to obtain access token (network): {exc} - response: {token_res.text}"
         current_run.log_error(msg)
-        raise RuntimeError("Unable to obtain IASO access token") from exc
+        raise
+    except json.JSONDecodeError as exc:
+        msg = f"Failed to parse token response JSON: {exc} - response: {token_res.text}"
+        current_run.log_error(msg)
+        raise
 
     if not token:
         current_run.log_error("Token response did not contain access token")
-        raise RuntimeError("IASO token missing in /api/token/ response")
+        raise ValueError("IASO token missing in /api/token/ response")
 
     return {"Authorization": f"Bearer {token}"}
 
@@ -273,14 +244,18 @@ def fetch_form_meta(iaso: IASO, form_id: int) -> dict:
     Returns:
         dict: Parsed form metadata JSON.
     """
-    meta_res = iaso.api_client.get(
-        f"/api/forms/{form_id}", params={"fields": "form_id,org_unit_type_ids,latest_form_version"}
-    )
     try:
+        meta_res = iaso.api_client.get(
+            f"/api/forms/{form_id}",
+            params={"fields": "form_id,org_unit_type_ids,latest_form_version"},
+        )
         meta_res.raise_for_status()
         return meta_res.json()
-    except Exception as exc:
+    except requests.RequestException as exc:
         current_run.log_error(f"Failed to fetch form metadata for form {form_id}: {exc}")
+        raise
+    except json.JSONDecodeError as exc:
+        current_run.log_error(f"Failed to parse form metadata JSON for form {form_id}: {exc}")
         raise
 
 

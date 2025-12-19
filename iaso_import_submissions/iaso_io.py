@@ -16,7 +16,6 @@ def read_submissions_file(file_path: Path) -> pl.DataFrame:
     Raises:
         FileNotFoundError: If the file doesn't exist
         ValueError: If file format is unsupported or file is empty
-        pl.exceptions.ComputeError: If data parsing fails
     """
     if not file_path.exists():
         raise FileNotFoundError(f"File {file_path} does not exist")
@@ -58,10 +57,6 @@ def read_submissions_file(file_path: Path) -> pl.DataFrame:
         )
 
         return df
-
-    except pl.exceptions.ComputeError as e:
-        current_run.log_error(f"Polars parsing error: {e}")
-        raise ValueError(f"Error parsing file {file_path}: {e}") from e
 
     except Exception as e:
         current_run.log_error(f"Unexpected error reading file: {e}")
