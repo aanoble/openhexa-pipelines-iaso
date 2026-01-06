@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import re
-import unicodedata
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import polars as pl
 from openhexa.sdk import (
@@ -16,42 +14,40 @@ from openhexa.sdk import (
     pipeline,
     workspace,
 )
-from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
-from openhexa.sdk.pipelines.parameter import IASOWidget
+from openhexa.sdk.datasets.dataset import Dataset
+from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO, dataframe
-
-# Precompile regex pattern for string cleaning
-CLEAN_PATTERN = re.compile(r"[^\w\s-]")
+from utils import clean_string, in_dataset_version
 
 
 @pipeline("iaso_extract_submissions")
-@parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
+@parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)  # type: ignore
 @parameter(
     "form_id",
     name="Form ID",
     type=int,
     widget=IASOWidget.IASO_FORMS,
-    connection="iaso_connection",
+    connection="iaso_connection",  # type: ignore
     required=True,
 )
 @parameter(
     "last_updated",
     name="Last Updated Date",
-    type=str,
+    type=str,  # type: ignore
     required=False,
     help="ISO formatted date (YYYY-MM-DD) for incremental data extraction",
 )
 @parameter(
     "choices_to_labels",
     name="Convert Choices to Labels",
-    type=bool,
+    type=bool,  # type: ignore
     default=True,
     required=False,
     help="Replace choice codes with labels",
 )
 @parameter(
     code="output_file_name",
-    type=str,
+    type=str,  # type: ignore
     name="Path and base name of the output file (without extension)",
     help=(
         "Path and base name of the output file (without extension) in the workspace files directory"
@@ -62,7 +58,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 )
 @parameter(
     code="output_format",
-    type=str,
+    type=str,  # type: ignore
     name="File format to use for exporting the data",
     required=False,
     default=".parquet",
@@ -75,14 +71,14 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 @parameter(
     "db_table_name",
     name="Database table name",
-    type=str,
+    type=str,  # type: ignore
     required=False,
     help="Target database table name",
 )
 @parameter(
     "save_mode",
     name="Save Mode",
-    type=str,
+    type=str,  # type: ignore
     required=False,
     choices=["append", "replace"],
     help="Database write behavior for existing tables",
@@ -90,7 +86,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 @parameter(
     "dataset",
     name="Output Dataset",
-    type=Dataset,
+    type=Dataset,  # type: ignore
     required=False,
     help="Target OpenHEXA dataset for storing submissions file",
 )
@@ -108,29 +104,23 @@ def iaso_extract_submissions(
     """Pipeline orchestration function for extracting and processing form submissions."""
     current_run.log_info("Starting form submissions extraction pipeline")
 
-    try:
-        iaso = authenticate_iaso(iaso_connection)
-        form_name = get_form_name(iaso, form_id)
-        cutoff_date = parse_cutoff_date(last_updated)
+    iaso = authenticate_iaso(iaso_connection)
+    form_name = get_form_name(iaso, form_id)
+    cutoff_date = parse_cutoff_date(last_updated)
 
-        submissions = fetch_submissions(iaso, form_id, cutoff_date)
-        submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
-        submissions = deduplicate_columns(submissions)
+    submissions = fetch_submissions(iaso, form_id, cutoff_date)
+    submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
+    submissions = deduplicate_columns(submissions)
 
-        output_file_path = export_to_file(submissions, form_name, output_file_name, output_format)
-        current_run.log_info(f"Data exported to file: `{output_file_path}`")
+    output_file_path = export_to_file(
+        submissions, form_name, output_file_name, output_format, db_table_name, dataset
+    )
 
-        if db_table_name:
-            export_to_database(submissions, db_table_name, save_mode)
+    export_to_database(submissions, db_table_name, save_mode)
 
-        if dataset:
-            export_to_dataset(file_path=output_file_path, dataset=dataset)
+    export_to_dataset(file_path=output_file_path, dataset=dataset)
 
-        current_run.log_info("Pipeline execution successful ✅")
-
-    except Exception as exc:
-        current_run.log_error(f"Pipeline failed: {exc}")
-        raise
+    current_run.log_info("Pipeline execution successful ✅")
 
 
 def authenticate_iaso(conn: IASOConnection) -> IASO:
@@ -149,9 +139,10 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
     except Exception as exc:
         error_msg = f"IASO authentication failed: {exc}"
         current_run.log_error(error_msg)
-        raise RuntimeError(error_msg) from exc
+        raise
 
 
+@iaso_extract_submissions.task
 def get_form_name(iaso: IASO, form_id: int) -> str:
     """Retrieve and sanitize form name.
 
@@ -170,9 +161,10 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         return clean_string(response.json().get("name"))
     except Exception as e:
         current_run.log_error(f"Form fetch failed: {e}")
-        raise ValueError("Invalid form ID") from e
+        raise
 
 
+@iaso_extract_submissions.task
 def parse_cutoff_date(date_str: str | None) -> str | None:
     """Validate and parse ISO date string.
 
@@ -195,6 +187,7 @@ def parse_cutoff_date(date_str: str | None) -> str | None:
         raise ValueError("Invalid date format") from exc
 
 
+@iaso_extract_submissions.task
 def fetch_submissions(
     iaso: IASO,
     form_id: int,
@@ -218,8 +211,9 @@ def fetch_submissions(
         raise
 
 
+@iaso_extract_submissions.task
 def process_choices(
-    submissions: pl.DataFrame, convert: bool, iaso_client: IASO, form_id: int
+    submissions: pl.DataFrame, convert: bool | None, iaso_client: IASO, form_id: int
 ) -> pl.DataFrame:
     """Convert choice codes to human-readable labels if requested.
 
@@ -236,15 +230,16 @@ def process_choices(
         return submissions
 
     try:
-        form_metadata = dataframe.get_form_metadata(iaso_client, form_id)
+        questions, choices = dataframe.get_form_metadata(iaso_client, form_id)
         return dataframe.replace_labels(
-            submissions=submissions, form_metadata=form_metadata, language="French"
+            submissions=submissions, questions=questions, choices=choices, language="French"
         )
     except Exception as exc:
         current_run.log_error(f"Choice conversion failed: {exc}")
         raise
 
 
+@iaso_extract_submissions.task
 def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
     """Renames duplicate columns in the DataFrame by appending a unique suffix.
 
@@ -270,9 +265,15 @@ def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
     return _process_submissions(submissions)
 
 
+@iaso_extract_submissions.task
 def export_to_file(
-    submissions: pl.DataFrame, form_name: str, output_file_name: str, output_format: str
-) -> Path:
+    submissions: pl.DataFrame,
+    form_name: str,
+    output_file_name: str,
+    output_format: str,
+    db_table_name: str | None = None,
+    dataset: Dataset | None = None,
+) -> Path | None:
     """Export submissions data to specified file format.
 
     Args:
@@ -281,10 +282,15 @@ def export_to_file(
         output_file_name: Optional custom output file name. If not provided, defaults to
             `iaso-pipelines/extract-submissions/form_<form_name>.<output_format>`.
         output_format: File format extension for the output file.
+        db_table_name: Optional database table name.
+        dataset: Optional dataset to store the output file.
 
     Returns:
-        Path: The path to the exported file.
+        Path to the exported file or None if no file was created.
     """
+    if db_table_name is True and not output_file_name and not dataset:
+        return None
+
     output_file_path = _generate_output_file_path(
         form_name=form_name, output_file_name=output_file_name, output_format=output_format
     )
@@ -298,10 +304,15 @@ def export_to_file(
         submissions.to_pandas().to_excel(output_file_path, index=False)
 
     current_run.add_file_output(output_file_path.as_posix())
+    current_run.log_info(f"Form submissions exported to file `{output_file_path}`")
+
     return output_file_path
 
 
-def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) -> None:
+@iaso_extract_submissions.task
+def export_to_database(
+    submissions: pl.DataFrame, table_name: str, mode: Literal["replace", "append"]
+) -> None:
     """Saves form submissions to a database.
 
     Args:
@@ -309,6 +320,9 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
         table_name: Name of the database table where submissions will be saved.
         mode: Mode to use when saving the table (replace or append).
     """
+    if table_name is None:
+        return
+
     if _validate_schema(submissions, table_name):
         mode = mode or "replace"
         submissions.write_database(
@@ -322,6 +336,7 @@ def export_to_database(submissions: pl.DataFrame, table_name: str, mode: str) ->
         )
 
 
+@iaso_extract_submissions.task
 def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
     """Saves form submissions to the specified dataset.
 
@@ -329,6 +344,9 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         file_path (Path): The path to the file containing the submissions data.
         dataset (Dataset): The dataset where the submissions will be stored.
     """
+    if dataset is None:
+        return
+
     latest_version = dataset.latest_version
     if bool(latest_version) and in_dataset_version(file_path, latest_version):
         current_run.log_info(
@@ -450,56 +468,6 @@ def _generate_output_file_path(form_name: str, output_file_name: str, output_for
     file_name = f"{base_name}_{timestamp}{output_format}"
 
     return output_dir / file_name
-
-
-def clean_string(input_str: str) -> str:
-    """Normalize and sanitize string for safe file/table names.
-
-    Args:
-        input_str: Original input string
-
-    Returns:
-        Normalized string with special characters removed
-    """
-    normalized = unicodedata.normalize("NFD", input_str)
-    cleaned = "".join(c for c in normalized if not unicodedata.combining(c))
-    sanitized = CLEAN_PATTERN.sub("", cleaned)
-    return sanitized.strip().replace(" ", "_").lower()
-
-
-def sha256_of_file(file_path: Path) -> str:
-    """Calculate the SHA-256 hash of a file.
-
-    Args:
-        file_path (Path): Path to the file.
-
-    Returns:
-        str: SHA-256 hash of the file content.
-    """
-    hasher = hashlib.sha256()
-    with file_path.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def in_dataset_version(file_path: Path, dataset_version: DatasetVersion) -> bool:
-    """Check if a file is in the specified dataset version.
-
-    Args:
-        file_path (Path): Path to the file.
-        dataset_version (DatasetVersion): The dataset version to check against.
-
-    Returns:
-        bool: True if the file is in the dataset version, False otherwise.
-    """
-    file_hash = sha256_of_file(file_path)
-    for file in dataset_version.files:
-        remote_hash = hashlib.sha256()
-        remote_hash.update(file.read())
-        if file_hash == remote_hash.hexdigest():
-            return True
-    return False
 
 
 if __name__ == "__main__":
