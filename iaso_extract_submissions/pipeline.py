@@ -104,8 +104,8 @@ def iaso_extract_submissions(
     """Pipeline orchestration function for extracting and processing form submissions."""
     current_run.log_info("Starting form submissions extraction pipeline")
 
-    iaso = IASO(iaso_connection.url, iaso_connection.username, iaso_connection.password)
-    # authenticate_iaso(iaso_connection)
+    iaso = authenticate_iaso(iaso_connection)
+
     form_name = get_form_name(iaso, form_id)
     cutoff_date = parse_cutoff_date(last_updated)
 
@@ -121,26 +121,24 @@ def iaso_extract_submissions(
 
     export_to_dataset(file_path=output_file_path, dataset=dataset)
 
-    # current_run.log_info("Pipeline execution successful ✅")
 
+def authenticate_iaso(conn: IASOConnection) -> IASO:
+    """Authenticates and returns an IASO object.
 
-# def authenticate_iaso(conn: IASOConnection) -> IASO:
-#     """Authenticates and returns an IASO object.
+    Args:
+        conn (IASOConnection): IASO connection details.
 
-#     Args:
-#         conn (IASOConnection): IASO connection details.
-
-#     Returns:
-#         IASO: An authenticated IASO object.
-#     """
-#     try:
-#         iaso = IASO(conn.url, conn.username, conn.password)
-#         current_run.log_info("IASO authentication successful")
-#         return iaso
-#     except Exception as exc:
-#         error_msg = f"IASO authentication failed: {exc}"
-#         current_run.log_error(error_msg)
-#         raise
+    Returns:
+        IASO: An authenticated IASO object.
+    """
+    try:
+        iaso = IASO(conn.url, conn.username, conn.password)
+        current_run.log_info("IASO authentication successful")
+        return iaso
+    except Exception as exc:
+        error_msg = f"IASO authentication failed: {exc}"
+        current_run.log_error(error_msg)
+        raise
 
 
 # @iaso_extract_submissions.task
