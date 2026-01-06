@@ -235,7 +235,6 @@ def process_choices(
         return dataframe.replace_labels(
             submissions=submissions,
             form_metadata=form_metadata,  # type: ignore
-            language="French",  # type: ignore
         )
     except Exception as exc:
         current_run.log_error(f"Choice conversion failed: {exc}")
@@ -272,7 +271,7 @@ def deduplicate_columns(submissions: pl.DataFrame) -> pl.DataFrame:
 def export_to_file(
     submissions: pl.DataFrame,
     form_name: str,
-    output_file_name: str,
+    output_file_name: str | None,
     output_format: str,
     db_table_name: str | None = None,
     dataset: Dataset | None = None,
@@ -291,7 +290,7 @@ def export_to_file(
     Returns:
         Path to the exported file or None if no file was created.
     """
-    if db_table_name is True and not output_file_name and not dataset:
+    if db_table_name and not (output_file_name or dataset):
         return None
 
     output_file_path = _generate_output_file_path(
@@ -433,7 +432,9 @@ def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
     return True
 
 
-def _generate_output_file_path(form_name: str, output_file_name: str, output_format: str) -> Path:
+def _generate_output_file_path(
+    form_name: str, output_file_name: str | None, output_format: str
+) -> Path:
     """Generate the output file path based on provided parameters.
 
     Args:
