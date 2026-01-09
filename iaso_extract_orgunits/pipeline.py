@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
-import unicodedata
 from datetime import datetime
 from io import StringIO
 from pathlib import Path
+from typing import Literal
 
 import geopandas as gpd
 import polars as pl
@@ -20,33 +18,30 @@ from openhexa.sdk import (
     pipeline,
     workspace,
 )
-from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
+from openhexa.sdk.datasets.dataset import Dataset
 from openhexa.toolbox.iaso import IASO, dataframe
-from shapely.geometry import MultiPolygon, Point, Polygon
 from sqlalchemy import create_engine
-
-# Precompile regex pattern for string cleaning
-CLEAN_PATTERN = re.compile(r"[^\w\s-]")
+from utils import clean_string, convert_to_geometry, get_driver, in_dataset_version
 
 
 @pipeline("iaso_extract_orgunits")
 @parameter(
     "iaso_connection",
     name="IASO connection",
-    type=IASOConnection,
+    type=IASOConnection,  # type: ignore
     required=True,
     help="Authenticated connection to IASO platform",
 )
 @parameter(
     "ou_type_id",
     name="Organization Unit Type ID",
-    type=int,
+    type=int,  # type: ignore
     required=False,
     help="Specific organization unit type identifier to extract",
 )
 @parameter(
     code="output_file_name",
-    type=str,
+    type=str,  # type: ignore
     name="Path and base name of the output file (without extension)",
     help=(
         "Path and base name of the output file (without extension) in the workspace files directory"
@@ -57,7 +52,7 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 )
 @parameter(
     code="output_format",
-    type=str,
+    type=str,  # type: ignore
     name="File format to use for exporting the data",
     required=False,
     default=".gpkg",
@@ -74,14 +69,14 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
 @parameter(
     "db_table_name",
     name="Database table name",
-    type=str,
+    type=str,  # type: ignore
     required=False,
     help="Target table name for organization units storage",
 )
 @parameter(
     "save_mode",
     name="Saving mode",
-    type=str,
+    type=str,  # type: ignore
     required=False,
     choices=["append", "replace"],
     help="Database write behavior for existing tables",
@@ -90,14 +85,14 @@ CLEAN_PATTERN = re.compile(r"[^\w\s-]")
     "dataset",
     name="Output Dataset",
     required=False,
-    type=Dataset,
+    type=Dataset,  # type: ignore
     help="Target dataset for orgunits data file export",
 )
 def iaso_extract_orgunits(
     iaso_connection: IASOConnection,
     ou_type_id: int | None,
     output_file_name: str | None,
-    output_format: str | None,
+    output_format: str,
     db_table_name: str | None,
     save_mode: str,
     dataset: Dataset | None,
@@ -121,20 +116,17 @@ def iaso_extract_orgunits(
     org_units_df = org_units_df.select(sorted(org_units_df.columns)).sort(org_units_df.columns)
 
     output_file_path = export_to_file(
-        org_units_df=org_units_df,
-        ou_type_id=ou_type_id,
-        output_file_name=output_file_name,
-        output_format=output_format,
+        org_units_df,
+        ou_type_id,
+        output_file_name,
+        output_format,
+        db_table_name,
+        dataset,
     )
-    current_run.log_info(f"Data exported to file: `{output_file_path}`")
 
-    if db_table_name:
-        export_to_database(org_units_df=org_units_df, table_name=db_table_name, save_mode=save_mode)
+    export_to_database(org_units_df=org_units_df, table_name=db_table_name, save_mode=save_mode)
 
-    if dataset:
-        export_to_dataset(file_path=output_file_path, dataset=dataset)
-
-    current_run.log_info("Pipeline executed successfully ✅")
+    export_to_dataset(file_path=output_file_path, dataset=dataset)
 
 
 # @iaso_extract_orgunits.task
@@ -260,23 +252,31 @@ def get_organisation_units(iaso_client: IASO, ou_type_id: int | None = None) -> 
         raise
 
 
+@iaso_extract_orgunits.task
 def export_to_file(
-    output_format: str,
     org_units_df: pl.DataFrame,
     ou_type_id: int | None,
     output_file_name: str | None,
-) -> Path:
+    output_format: str,
+    db_table_name: str | None = None,
+    dataset: Dataset | None = None,
+) -> Path | None:
     """Export organizational units data to specified file format.
 
     Args:
-        output_format: File format extension for the output file.
         org_units_df: DataFrame containing organizational units data.
         ou_type_id: Optional specific organization unit type identifier.
         output_file_name: Optional custom output file name.
+        output_format: File format extension for the output file.
+        db_table_name: Optional database table name.
+        dataset: Optional dataset to store the output file.
 
     Returns:
         Path: The path to the exported file.
     """
+    if db_table_name and not (output_file_name or dataset):
+        return None
+
     output_file_path = _generate_output_file_path(
         output_format=output_format,
         org_units_df=org_units_df,
@@ -316,7 +316,7 @@ def export_to_file(
                 json.dump(topo.to_dict(), f)
 
         else:
-            geo_df.to_file(output_file_path, driver=_get_driver(output_format), encoding="utf-8")
+            geo_df.to_file(output_file_path, driver=get_driver(output_format), encoding="utf-8")
 
     else:
         if output_format == ".csv":
@@ -329,6 +329,7 @@ def export_to_file(
             org_units_df.to_pandas().to_excel(output_file_path, index=False)
 
     current_run.add_file_output(output_file_path.as_posix())
+    current_run.log_info(f"Data exported to file: `{output_file_path}`")
     if output_format == ".shp":
         for suffix in [".shx", ".dbf", ".prj", ".cpg"]:
             current_run.add_file_output(output_file_path.with_suffix(suffix).as_posix())
@@ -336,12 +337,12 @@ def export_to_file(
     return output_file_path
 
 
-# @iaso_extract_orgunits.task
+@iaso_extract_orgunits.task
 def export_to_database(
     org_units_df: pl.DataFrame,
     table_name: str | None,
-    save_mode: str,
-) -> gpd.GeoDataFrame:
+    save_mode: Literal["replace", "append"] | None,
+) -> None:
     """Export organizational units data to spatial database.
 
     Args:
@@ -352,6 +353,9 @@ def export_to_database(
     Raises:
         RuntimeError: If database export fails
     """
+    if not table_name:
+        return
+
     current_run.log_info("Exporting to database table")
 
     try:
@@ -369,7 +373,7 @@ def export_to_database(
         raise RuntimeError("Database export operation failed") from err
 
 
-# @iaso_extract_orgunits.task
+@iaso_extract_orgunits.task
 def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
     """Export organizational units data to geopackage dataset.
 
@@ -377,6 +381,9 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         file_path: Path to the exported file to be added to the dataset
         dataset: Target dataset for export
     """
+    if dataset is None:
+        return
+
     latest_version = dataset.latest_version
     if bool(latest_version) and in_dataset_version(file_path, latest_version):
         current_run.log_info(
@@ -387,7 +394,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
 
     version_number = int(latest_version.name.lstrip("v")) + 1 if latest_version else 1
     version = dataset.create_version(f"v{version_number}")
-    
+
     if file_path.suffix != ".shp":
         version.add_file(file_path, file_path.name)
     else:
@@ -474,96 +481,6 @@ def _prepare_geodataframe(df: pl.DataFrame) -> gpd.GeoDataFrame:
         .to_pandas()
         .pipe(lambda df: gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326"))
     )
-
-
-def convert_to_geometry(geometry_str: str) -> Point | MultiPolygon | None:
-    """Convert GeoJSON string to Shapely geometry object.
-
-    Args:
-        geometry_str: GeoJSON-formatted geometry string
-
-    Returns:
-        Shapely geometry object or None for invalid inputs
-    """
-    try:
-        geom_data = json.loads(geometry_str)
-        coords = geom_data["coordinates"]
-
-        if geom_data["type"] == "Point":
-            return Point(coords[0], coords[1])
-
-        if geom_data["type"] == "MultiPolygon":
-            polygons = [Polygon(polygon) for polygon in coords[0]]
-            return MultiPolygon(polygons)
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
-
-
-def clean_string(input_str: str) -> str:
-    """Normalize and sanitize string for safe file/table names.
-
-    Args:
-        input_str: Original input string
-
-    Returns:
-        Normalized string with special characters removed
-    """
-    normalized = unicodedata.normalize("NFD", input_str)
-    cleaned = "".join(c for c in normalized if not unicodedata.combining(c))
-    sanitized = CLEAN_PATTERN.sub("", cleaned)
-    return sanitized.strip().replace(" ", "_").lower()
-
-
-def _get_driver(output_format: str) -> str:
-    """Return the appropriate driver string for a given output file format.
-
-    Args:
-        output_format: File format extension (e.g., '.gpkg', '.shp').
-
-    Returns:
-        The corresponding driver string for the specified format.
-    """
-    return {
-        ".gpkg": "GPKG",
-        ".shp": "ESRI Shapefile",
-        ".geojson": "GeoJSON",
-        ".topojson": "TopoJSON",
-    }[output_format]
-
-
-def sha256_of_file(file_path: Path) -> str:
-    """Calculate the SHA-256 hash of a file.
-
-    Args:
-        file_path (Path): Path to the file.
-
-    Returns:
-        str: SHA-256 hash of the file content.
-    """
-    hasher = hashlib.sha256()
-    with file_path.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def in_dataset_version(file_path: Path, dataset_version: DatasetVersion) -> bool:
-    """Check if a file is in the specified dataset version.
-
-    Args:
-        file_path (Path): Path to the file.
-        dataset_version (DatasetVersion): The dataset version to check against.
-
-    Returns:
-        bool: True if the file is in the dataset version, False otherwise.
-    """
-    file_hash = sha256_of_file(file_path)
-    for file in dataset_version.files:
-        remote_hash = hashlib.sha256()
-        remote_hash.update(file.read())
-        if file_hash == remote_hash.hexdigest():
-            return True
-    return False
 
 
 if __name__ == "__main__":
