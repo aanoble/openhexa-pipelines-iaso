@@ -385,10 +385,29 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
         return
 
     latest_version = dataset.latest_version
-    if bool(latest_version) and in_dataset_version(file_path, latest_version):
+    if (
+        bool(latest_version)
+        and file_path.suffix != ".shp"
+        and in_dataset_version(file_path, latest_version)
+    ):
         current_run.log_info(
             f"Organizational units file `{file_path.name}` already exists in dataset version "
             f"`{latest_version.name}` and no changes have been detected"
+        )
+        return
+    
+    if (
+        file_path.suffix == ".shp"
+        and bool(latest_version)
+        and all(
+            in_dataset_version(file_path.with_suffix(suffix), latest_version)
+            for suffix in [".shp", ".shx", ".dbf", ".prj", ".cpg"]
+        )
+    ):
+        current_run.log_info(
+            f"Organizational units shapefile `{file_path.name}` and its associated files "
+            f"already exist in dataset version `{latest_version.name}` and no changes have "
+            f"been detected"
         )
         return
 
