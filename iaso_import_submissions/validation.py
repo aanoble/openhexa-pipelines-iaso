@@ -2,7 +2,7 @@ import re
 
 import polars as pl
 from openhexa.sdk import current_run
-from pydantic import BaseModel  # type: ignore
+from pydantic import BaseModel, Field
 from utils import calculate_to_polars_expr
 
 
@@ -19,11 +19,11 @@ class ValidationResult(BaseModel):
     """
 
     is_valid: bool
-    errors: list[str] = []
-    warnings: list[str] = []
-    missing_columns: list[str] = []
-    invalid_types: dict[str, tuple[str, str]] = {}
-    required_columns_present: set[str] = set()
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    missing_columns: list[str] = Field(default_factory=list)
+    invalid_types: dict[str, tuple[str, str]] = Field(default_factory=dict)
+    required_columns_present: set[str] = Field(default_factory=set)
 
 
 def validate_data_structure(
@@ -39,7 +39,14 @@ def validate_data_structure(
         import_strategy (str): The import strategy being used.
 
     Returns:
-        bool: True if the data structure is valid, False otherwise.
+        dict: A dictionary representation of the validation result with the following keys:
+            - is_valid (bool): Whether the data structure is considered valid.
+            - errors (list[str]): List of error messages.
+            - warnings (list[str]): List of warning messages.
+            - missing_columns (list[str]): List of missing columns in the data.
+            - invalid_types (dict[str, tuple[str, str]]): Mapping of columns to a tuple of
+              (expected_type, actual_type).
+            - required_columns_present (set[str]): Set of required columns that are present.
     """
     result = ValidationResult(is_valid=True)
 
@@ -272,15 +279,20 @@ def validate_field_constraints(
     """
     constraints_fields = questions.filter(pl.col("constraint").is_not_null())["name"].to_list()
     multiple_choices = questions.filter(pl.col("type").str.contains("select"))["name"].to_list()
+    list_col = next((c for c in ("list name", "list_name") if c in choices.columns), None)
+
     is_valid = True
     for col, value in record.items():
         if col in constraints_fields:
             constraints = questions.filter(pl.col("name") == col)["constraint"][0]
-            is_valid = _validate_value(value, constraints)
+            is_valid = is_valid and _validate_value(value, constraints)
 
         if col in multiple_choices:
+            if list_col is None:
+                continue
+            
             is_valid = (
-                is_valid and value in choices.filter(pl.col("list name") == col)["label"].to_list()
+                is_valid and value in choices.filter(pl.col(list_col) == col)["label"].to_list()
             )
     return is_valid
 
@@ -289,27 +301,61 @@ def _validate_value(value: str, constraints: str) -> bool:
     if constraints.startswith("regex"):
         # Extract pattern
         pattern = re.search(r"regex\(.,\s*'(.+)'\)", constraints)
+        if not pattern:
+            return False
         if pattern:
             try:
                 return bool(re.match(pattern.group(1), str(value)))
-            except (ValueError, TypeError):
+            except (re.error, ValueError, TypeError):
                 return False
 
     if constraints.startswith(".<="):
-        threshold = float(constraints[3:])
+        threshold_str = constraints[3:].strip()
         try:
+            threshold = float(threshold_str)
             return float(value) <= threshold
         except (ValueError, TypeError):
             return False
 
     elif constraints.startswith(".>="):
-        threshold = float(constraints[3:])
+        threshold_str = constraints[3:].strip()
         try:
+            threshold = float(threshold_str)
             return float(value) >= threshold
         except (ValueError, TypeError):
             return False
 
-    # Other constraintss
+    elif constraints.startswith(".<"):
+        threshold_str = constraints[2:].strip()
+        try:
+            threshold = float(threshold_str)
+            return float(value) < threshold
+        except (ValueError, TypeError):
+            return False
+
+    elif constraints.startswith(".>"):
+        threshold_str = constraints[2:].strip()
+        try:
+            threshold = float(threshold_str)
+            return float(value) > threshold
+        except (ValueError, TypeError):
+            return False
+
+    elif constraints.startswith(".="):
+        threshold_str = constraints[2:].strip()
+        try:
+            return float(value) == float(threshold_str)
+        except (ValueError, TypeError):
+            return str(value) == threshold_str
+
+    elif constraints.startswith(".!="):
+        threshold_str = constraints[3:].strip()
+        try:
+            return float(value) != float(threshold_str)
+        except (ValueError, TypeError):
+            return str(value) != threshold_str
+
+    # Other constraints
     else:
         # not yet implemented
         return True

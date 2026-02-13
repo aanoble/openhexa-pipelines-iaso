@@ -64,11 +64,10 @@ Ignored rows arise from failed validation, missing required columns, API failure
 ## Data Structure & Validation
 Validation steps (when `strict_validation=True`):
 1. Schema/type enforcement (casts attempted where possible).
-2. Constraint & choices summaries
-  - If the submissions file **does not** include a `form_version` **column**: a single, global constraint set is used.
-  - If the submissions file **does** include a `form_version` **column**: constraints are determined **per row**, based on the row’s `form_version` value (via form questions).
-3. Row-level field constraint validation (during template selection).
-4. Rows failing validation contribute to `ignored`.
+2. Constraint & choices validation
+  - If the submissions file **does not** include a `form_version` **column**: a single, global validation pass is computed and stored in `constraints_validation_summary` / `choices_validation_summary`.
+  - If the submissions file **does** include a `form_version` **column**: validation is performed **per row** during template selection, using metadata (questions + choices) loaded for that row’s `form_version`.
+3. Rows failing constraint/choices validation contribute to `ignored`.
 
 When `strict_validation=False`, all rows pass validation unless critical columns (e.g. `id` for UPDATE) are missing.
 

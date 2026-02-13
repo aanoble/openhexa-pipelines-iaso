@@ -60,7 +60,7 @@ CAST_MAP = {
 )
 @parameter(
     "input_file",
-    type=File,
+    type=File,  # type: ignore
     name="IASO form submission file",
     required=True,
 )
@@ -167,7 +167,7 @@ def generate_templates_for_versions(
     form_id: int,
     meta: dict,
     questions: pl.DataFrame,
-    choices: pl.DataFrame,
+    questions_by_version: dict[str, pl.DataFrame] | None = None,
 ) -> dict:
     """Generate XML templates keyed by form version.
 
@@ -192,15 +192,22 @@ def generate_templates_for_versions(
             form_version=latest_version_id,
         )
     else:
-        for version in df["form_version"].unique().to_list():
-            questions_for_version = get_form_metadata(
-                iaso=iaso, form_id=form_id, form_version=version
+        for version in df["form_version"].drop_nulls().unique().to_list():
+            version_str = str(version)
+            questions_for_version = (
+                questions_by_version.get(version_str)
+                if questions_by_version
+                else get_form_metadata(iaso=iaso, form_id=form_id, form_version=version_str)
             )
-            templates[version] = generate_xml_template(
+            if questions_for_version is None:
+                questions_for_version = get_form_metadata(
+                    iaso=iaso, form_id=form_id, form_version=version_str
+                )
+            templates[version_str] = generate_xml_template(
                 df=df,
                 questions=questions_for_version,
                 id_form=str(meta.get("form_id") or ""),
-                form_version=version,
+                form_version=version_str,
             )
 
     return templates
@@ -213,6 +220,8 @@ def _select_template_and_is_valid(
     questions: pl.DataFrame,
     choices: pl.DataFrame,
     templates: dict,
+    questions_by_version: dict[str, pl.DataFrame] | None = None,
+    choices_by_version: dict[str, pl.DataFrame] | None = None,
 ) -> tuple[bool, str | None]:
     """Return (is_valid, xml_template) for a record.
 
@@ -246,8 +255,17 @@ def _select_template_and_is_valid(
 
         xml_template = templates["latest_version"]
     else:
-        is_valid = validate_field_constraints(record, questions, choices)
-        xml_template = templates.get(record.get("form_version"))
+        version = str(record.get("form_version") or "")
+        questions_for_validation = (
+            questions_by_version.get(version, questions) if questions_by_version else questions
+        )
+        choices_for_validation = (
+            choices_by_version.get(version, choices) if choices_by_version else choices
+        )
+        is_valid = validate_field_constraints(
+            record, questions_for_validation, choices_for_validation
+        )
+        xml_template = templates.get(record.get("form_version")) or templates.get(version)
 
     # If strict validation is disabled, accept the record regardless
     if not strict_validation:
@@ -316,6 +334,8 @@ def handle_create_mode(
     strict_validation: bool,
     output_directory: str | None,
     templates: dict,
+    questions_by_version: dict[str, pl.DataFrame] | None = None,
+    choices_by_version: dict[str, pl.DataFrame] | None = None,
 ) -> dict[str, int]:
     """Handle creation/import of new instances from the dataframe.
 
@@ -339,6 +359,8 @@ def handle_create_mode(
                 questions=questions,
                 choices=choices,
                 templates=templates,
+                questions_by_version=questions_by_version,
+                choices_by_version=choices_by_version,
             )
             if not is_valid:
                 summary["ignored"] += 1
@@ -423,6 +445,8 @@ def handle_update_mode(
     strict_validation: bool,
     output_directory: str | None,
     templates: dict,
+    questions_by_version: dict[str, pl.DataFrame] | None = None,
+    choices_by_version: dict[str, pl.DataFrame] | None = None,
 ) -> dict[str, int]:
     """Handle update of existing instances from the dataframe.
 
@@ -456,6 +480,8 @@ def handle_update_mode(
                 questions=questions,
                 choices=choices,
                 templates=templates,
+                questions_by_version=questions_by_version,
+                choices_by_version=choices_by_version,
             )
             if not is_valid:
                 summary["ignored"] += 1
@@ -598,8 +624,30 @@ def push_submissions(
         # Run global validation to ensure summary columns exist
         df = validate_global_data(df=df, questions=questions, choices=choices)
 
+    questions_by_version: dict[str, pl.DataFrame] = {}
+    choices_by_version: dict[str, pl.DataFrame] = {}
+    if "form_version" in df.columns:
+        for version in df["form_version"].drop_nulls().unique().to_list():
+            version_str = str(version)
+            questions_by_version[version_str] = get_form_metadata(
+                iaso=iaso, form_id=form_id, form_version=version_str
+            )
+            choices_by_version[version_str] = get_form_metadata(
+                iaso=iaso,
+                form_id=form_id,
+                form_version=version_str,
+                type_metadata="choices",
+            )
+
     if import_strategy == "CREATE":
-        templates = generate_templates_for_versions(iaso, df, form_id, meta, questions, choices)
+        templates = generate_templates_for_versions(
+            iaso,
+            df,
+            form_id,
+            meta,
+            questions,
+            questions_by_version=questions_by_version,
+        )
         current_run.log_info(f"Pushing {len(df)} submissions to IASO for app ID {app_id} start")
         summary = handle_create_mode(
             iaso=iaso,
@@ -612,11 +660,20 @@ def push_submissions(
             strict_validation=strict_validation,
             output_directory=output_directory,
             templates=templates,
+            questions_by_version=questions_by_version,
+            choices_by_version=choices_by_version,
         )
         current_run.log_info(f"Push finished. Summary: {summary}")
 
     if import_strategy == "UPDATE":
-        templates = generate_templates_for_versions(iaso, df, form_id, meta, questions, choices)
+        templates = generate_templates_for_versions(
+            iaso,
+            df,
+            form_id,
+            meta,
+            questions,
+            questions_by_version=questions_by_version,
+        )
         current_run.log_info(f"Updating {len(df)} submissions in IASO for app ID {app_id} start")
         summary = handle_update_mode(
             iaso=iaso,
@@ -628,6 +685,8 @@ def push_submissions(
             strict_validation=strict_validation,
             output_directory=output_directory,
             templates=templates,
+            questions_by_version=questions_by_version,
+            choices_by_version=choices_by_version,
         )
         current_run.log_info(f"Update finished. Summary: {summary}")
 
@@ -646,8 +705,15 @@ def push_submissions(
             strict_validation=strict_validation,
             output_directory=output_directory,
             templates=generate_templates_for_versions(
-                iaso, df_create, form_id, meta, questions, choices
+                iaso,
+                df_create,
+                form_id,
+                meta,
+                questions,
+                questions_by_version=questions_by_version,
             ),
+            questions_by_version=questions_by_version,
+            choices_by_version=choices_by_version,
         )
         summary_update = handle_update_mode(
             iaso=iaso,
@@ -659,8 +725,15 @@ def push_submissions(
             strict_validation=strict_validation,
             output_directory=output_directory,
             templates=generate_templates_for_versions(
-                iaso, df_update, form_id, meta, questions, choices
+                iaso,
+                df_update,
+                form_id,
+                meta,
+                questions,
+                questions_by_version=questions_by_version,
             ),
+            questions_by_version=questions_by_version,
+            choices_by_version=choices_by_version,
         )
         summary = {
             "imported": summary_create["imported"],
